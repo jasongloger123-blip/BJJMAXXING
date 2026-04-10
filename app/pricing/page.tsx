@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { ArrowLeft, Check, Minus, Sparkles, Star, Zap } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { STRIPE_PRODUCTS } from '@/lib/stripe'
 import { createClient } from '@/lib/supabase/client'
@@ -73,7 +73,7 @@ const testimonials = [
   },
 ]
 
-export default function PricingPage() {
+function PricingPageContent() {
   const supabase = createClient()
   const searchParams = useSearchParams()
   const [loadingKey, setLoadingKey] = useState<string | null>(null)
@@ -188,7 +188,7 @@ export default function PricingPage() {
               className="inline-flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500 transition-colors hover:text-white"
             >
               <ArrowLeft className="h-4 w-4" />
-              Zurueck zur Landingpage
+              Zurueck
             </Link>
           </div>
 
@@ -442,5 +442,13 @@ export default function PricingPage() {
         </section>
       </main>
     </div>
+  )
+}
+
+export default function PricingPage() {
+  return (
+    <Suspense fallback={<div className="landing-shell min-h-screen" />}>
+      <PricingPageContent />
+    </Suspense>
   )
 }

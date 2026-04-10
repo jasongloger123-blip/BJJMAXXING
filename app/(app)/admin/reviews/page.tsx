@@ -280,9 +280,9 @@ export default function AdminReviewsPage() {
             </div>
 
             <div className="rounded-2xl border border-bjj-border bg-bjj-surface p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Nutzer-Notizen</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Nutzer-Technik</p>
               <p className="mt-3 whitespace-pre-wrap text-sm text-bjj-text">
-                {selectedReview.notes?.trim() || 'Keine Notizen angegeben.'}
+                {selectedReview.notes?.trim() || 'Keine Technik angegeben.'}
               </p>
             </div>
 

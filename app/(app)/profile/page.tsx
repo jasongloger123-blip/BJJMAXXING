@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, Facebook, Globe2, ImagePlus, Instagram, Music2, PlayCircle, Shield, Sparkles, X, Youtube } from 'lucide-react'
+import { Camera, Check, Facebook, Globe2, ImagePlus, Instagram, Music2, Pencil, Shield, Sparkles, X, Youtube } from 'lucide-react'
+import { ProfileSavedClips } from '@/components/profile/ProfileSavedClips'
 import { ARCHETYPES } from '@/lib/archetypes'
-import { getPlanLevel } from '@/lib/nodes'
-import { COUNTRY_OPTIONS, getCountryLabel, getFlagSvgUrl } from '@/lib/countries'
+import { getCountryLabel, getFlagSvgUrl } from '@/lib/countries'
 import { createClient } from '@/lib/supabase/client'
 import { waitForAuthenticatedUser } from '@/lib/supabase/auth-guard'
 
@@ -20,7 +20,16 @@ type ProfileData = {
   gym_name: string | null
   gym_unlisted_name: string | null
   gym_location: string | null
+  social_link: string | null
+  youtube_url: string | null
+  tiktok_url: string | null
+  instagram_url: string | null
+  facebook_url: string | null
 }
+
+type SocialPlatform = 'youtube' | 'instagram' | 'tiktok' | 'facebook'
+
+type SocialLinkDrafts = Record<SocialPlatform, string>
 
 type LinkedIdentity = {
   provider: string
@@ -79,51 +88,117 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
   },
 ]
 
+const SOCIAL_LINK_FIELDS: Array<{
+  key: SocialPlatform
+  label: string
+  placeholder: string
+  Icon: typeof Youtube
+  accent: string
+}> = [
+  {
+    key: 'youtube',
+    label: 'YouTube',
+    placeholder: 'https://youtube.com/@deinkanal',
+    Icon: Youtube,
+    accent: 'text-[#ff6b5c]',
+  },
+  {
+    key: 'instagram',
+    label: 'Instagram',
+    placeholder: 'https://instagram.com/deinprofil',
+    Icon: Instagram,
+    accent: 'text-[#ff9ac2]',
+  },
+  {
+    key: 'tiktok',
+    label: 'TikTok',
+    placeholder: 'https://tiktok.com/@deinprofil',
+    Icon: Music2,
+    accent: 'text-[#9cf3ea]',
+  },
+  {
+    key: 'facebook',
+    label: 'Facebook',
+    placeholder: 'https://facebook.com/deinprofil',
+    Icon: Facebook,
+    accent: 'text-[#7da4ff]',
+  },
+]
+
+function normalizeSocialUrl(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  return `https://${trimmed}`
+}
+
 export default function ProfilePage() {
   const router = useRouter()
   const supabase = createClient()
   const [profile, setProfile] = useState<ProfileData | null>(null)
-  const [watchedCount, setWatchedCount] = useState(0)
+  const [isLoading, setIsLoading] = useState(true)
   const [identities, setIdentities] = useState<LinkedIdentity[]>([])
   const [connectingProvider, setConnectingProvider] = useState<string | null>(null)
   const [connectMessage, setConnectMessage] = useState<string | null>(null)
   const [avatarDraft, setAvatarDraft] = useState('')
+  const [socialLinkDrafts, setSocialLinkDrafts] = useState<SocialLinkDrafts>({
+    youtube: '',
+    instagram: '',
+    tiktok: '',
+    facebook: '',
+  })
   const [savingAvatar, setSavingAvatar] = useState(false)
+  const [savingSocialLinkId, setSavingSocialLinkId] = useState<SocialPlatform | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarModalOpen, setAvatarModalOpen] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
-  const [nationalityDraft, setNationalityDraft] = useState('')
-  const [savingNationality, setSavingNationality] = useState(false)
 
   const loadData = useCallback(async () => {
+    setIsLoading(true)
     const user = await waitForAuthenticatedUser(supabase)
 
     if (!user) {
       router.push('/login')
+      setIsLoading(false)
       return
     }
 
     setUserId(user.id)
 
-    const [profileResult, watchedResult] = await Promise.all([
-      supabase
-        .from('user_profiles')
-        .select('email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location')
-        .eq('id', user.id)
-        .maybeSingle(),
-      supabase.from('training_clip_events').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-    ])
+    const profileSelects = [
+      'email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location, social_link, youtube_url, tiktok_url, instagram_url, facebook_url',
+      'email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location, social_link',
+      'email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location',
+      'email, username, full_name, avatar_url, belt, primary_archetype, gym_name, gym_unlisted_name, gym_location',
+    ]
 
-    let profileData = profileResult.data as (ProfileData & { nationality?: string | null }) | null
+    let profileData:
+      | (ProfileData & {
+          nationality?: string | null
+          social_link?: string | null
+          youtube_url?: string | null
+          tiktok_url?: string | null
+          instagram_url?: string | null
+          facebook_url?: string | null
+        })
+      | null = null
 
-    if (profileResult.error) {
-      const fallbackProfile = await supabase
-        .from('user_profiles')
-        .select('email, username, full_name, avatar_url, belt, primary_archetype, gym_name, gym_unlisted_name, gym_location')
-        .eq('id', user.id)
-        .maybeSingle()
-
-      profileData = fallbackProfile.data ? { ...fallbackProfile.data, nationality: null } : null
+    for (const select of profileSelects) {
+      const profileResult = await supabase.from('user_profiles').select(select).eq('id', user.id).maybeSingle()
+      if (!profileResult.error) {
+        profileData = profileResult.data
+          ? {
+              nationality: null,
+              social_link: null,
+              youtube_url: null,
+              tiktok_url: null,
+              instagram_url: null,
+              facebook_url: null,
+              ...profileResult.data,
+            }
+          : null
+        break
+      }
     }
 
     const nationality = profileData?.nationality ?? null
@@ -139,11 +214,21 @@ export default function ProfilePage() {
       gym_name: profileData?.gym_name ?? null,
       gym_unlisted_name: profileData?.gym_unlisted_name ?? null,
       gym_location: profileData?.gym_location ?? null,
+      social_link: profileData?.social_link ?? null,
+      youtube_url: profileData?.youtube_url ?? null,
+      tiktok_url: profileData?.tiktok_url ?? null,
+      instagram_url: profileData?.instagram_url ?? null,
+      facebook_url: profileData?.facebook_url ?? null,
     })
-    setNationalityDraft(nationality ?? '')
     setAvatarDraft(profileData?.avatar_url ?? '')
-    setWatchedCount(watchedResult.count ?? 0)
+    setSocialLinkDrafts({
+      youtube: profileData?.youtube_url ?? '',
+      instagram: profileData?.instagram_url ?? '',
+      tiktok: profileData?.tiktok_url ?? '',
+      facebook: profileData?.facebook_url ?? '',
+    })
     setIdentities((user.identities as LinkedIdentity[] | undefined) ?? [])
+    setIsLoading(false)
   }, [router, supabase])
 
   useEffect(() => {
@@ -151,7 +236,6 @@ export default function ProfilePage() {
   }, [loadData])
 
   const archetype = ARCHETYPES.find((entry) => entry.id === profile?.primary_archetype) ?? ARCHETYPES[0]
-  const level = getPlanLevel([])
   const displayName = profile?.username ?? profile?.full_name ?? 'BJJ Athlete'
   const initials = displayName
     .split(' ')
@@ -159,13 +243,10 @@ export default function ProfilePage() {
     .join('')
     .slice(0, 2)
     .toUpperCase()
+  const gymDisplayName = profile?.gym_name ?? profile?.gym_unlisted_name ?? null
   const connectedProviders = useMemo(() => new Set(identities.map((identity) => identity.provider)), [identities])
   const nationalityFlagUrl = getFlagSvgUrl(profile?.nationality)
   const nationalityLabel = getCountryLabel(profile?.nationality)
-  const gymDisplayName = profile?.gym_name ?? profile?.gym_unlisted_name ?? null
-  const connectedProvidersCount = CONNECT_PROVIDERS.filter((entry) =>
-    entry.id === 'youtube' ? connectedProviders.has('google') : connectedProviders.has(entry.id)
-  ).length
 
   async function handleConnectAccount(entry: ConnectProvider) {
     const confirmed = window.confirm(`${entry.label} verbinden?`)
@@ -220,6 +301,39 @@ export default function ProfilePage() {
     setConnectMessage('Profilbild gespeichert.')
   }
 
+  async function saveSocialLink(platform: SocialPlatform) {
+    if (!userId) return
+    setSavingSocialLinkId(platform)
+    setConnectMessage(null)
+
+    const normalizedValue = normalizeSocialUrl(socialLinkDrafts[platform])
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ [`${platform}_url`]: normalizedValue })
+      .eq('id', userId)
+
+    setSavingSocialLinkId(null)
+
+    if (error) {
+      setConnectMessage(`Social Link konnte nicht gespeichert werden: ${error.message}`)
+      return
+    }
+
+    setProfile((current) =>
+      current
+        ? {
+            ...current,
+            [`${platform}_url`]: normalizedValue,
+          }
+        : current
+    )
+    setSocialLinkDrafts((current) => ({
+      ...current,
+      [platform]: normalizedValue ?? '',
+    }))
+    setConnectMessage(`${SOCIAL_LINK_FIELDS.find((entry) => entry.key === platform)?.label ?? 'Social Link'} gespeichert.`)
+  }
+
   async function handleAvatarFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
@@ -268,37 +382,34 @@ export default function ProfilePage() {
     setConnectMessage('Profilbild hochgeladen.')
   }
 
-  async function saveNationality() {
-    if (!userId) return
-
-    setSavingNationality(true)
-    setConnectMessage(null)
-
-    const normalizedNationality = nationalityDraft || null
-    const { error } = await supabase.from('user_profiles').update({ nationality: normalizedNationality }).eq('id', userId)
-
-    setSavingNationality(false)
-
-    if (error) {
-      setConnectMessage(`Nationalitaet konnte nicht gespeichert werden: ${error.message}`)
-      return
-    }
-
-    setProfile((current) => (current ? { ...current, nationality: normalizedNationality } : current))
-    window.dispatchEvent(new Event('profile-ready-changed'))
-    setConnectMessage('Nationalitaet gespeichert.')
+  if (isLoading) {
+    return (
+      <div className="mx-auto w-full">
+        <section className="space-y-6">
+          <div className="relative flex h-[300px] items-center justify-center overflow-hidden rounded-[2.25rem] border border-black/20 bg-[linear-gradient(180deg,rgba(24,31,45,0.96)_0%,rgba(17,22,31,0.99)_100%)] p-6 shadow-card sm:p-8">
+            <div className="flex flex-col items-center gap-4">
+              <div className="h-28 w-28 animate-pulse rounded-[2rem] bg-bjj-surface sm:h-36 sm:w-36" />
+              <div className="h-8 w-48 animate-pulse rounded-xl bg-bjj-surface" />
+              <div className="flex gap-2">
+                <div className="h-8 w-24 animate-pulse rounded-full bg-bjj-surface" />
+                <div className="h-8 w-32 animate-pulse rounded-full bg-bjj-surface" />
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    )
   }
 
   return (
     <>
-      <div className="mx-auto w-full max-w-6xl">
+      <div className="mx-auto w-full">
         <section className="space-y-6">
-          <div className="relative overflow-hidden rounded-[2.25rem] border border-white/10 bg-[linear-gradient(180deg,rgba(24,31,45,0.92)_0%,rgba(17,22,31,0.98)_100%)] p-6 shadow-card sm:p-8">
+          <div className="relative overflow-hidden rounded-[2.25rem] border border-black/20 bg-[linear-gradient(180deg,rgba(24,31,45,0.96)_0%,rgba(17,22,31,0.99)_100%)] p-6 shadow-card sm:p-8">
             <div className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-bjj-gold/12 blur-3xl" />
             <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-40 rounded-full bg-[#6e86b8]/10 blur-3xl" />
 
-            <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_26rem] xl:items-start">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:gap-8">
+            <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:gap-8">
                 <button
                   type="button"
                   onClick={() => setAvatarModalOpen(true)}
@@ -309,17 +420,17 @@ export default function ProfilePage() {
                     <img
                       src={profile.avatar_url}
                       alt={displayName}
-                      className="h-28 w-28 rounded-[2rem] object-cover ring-1 ring-white/10 transition duration-300 group-hover:scale-[1.02] group-hover:ring-bjj-gold/45 sm:h-36 sm:w-36"
+                      className="h-28 w-28 rounded-[2rem] object-cover ring-1 ring-black/20 transition duration-300 group-hover:scale-[1.02] group-hover:ring-bjj-gold/45 sm:h-36 sm:w-36"
                     />
                   ) : (
-                    <div className="flex h-28 w-28 items-center justify-center rounded-[2rem] bg-[linear-gradient(180deg,#2b3446,#171e2a)] text-3xl font-black text-white ring-1 ring-white/10 transition duration-300 group-hover:scale-[1.02] group-hover:ring-bjj-gold/45 sm:h-36 sm:w-36">
+                    <div className="flex h-28 w-28 items-center justify-center rounded-[2rem] bg-[linear-gradient(180deg,#2b3446,#171e2a)] text-3xl font-black text-white ring-1 ring-black/20 transition duration-300 group-hover:scale-[1.02] group-hover:ring-bjj-gold/45 sm:h-36 sm:w-36">
                       {initials}
                     </div>
                   )}
                   <span className="absolute inset-0 flex items-center justify-center rounded-[2rem] bg-black/0 text-white opacity-0 transition duration-300 group-hover:bg-black/35 group-hover:opacity-100">
                     <Camera className="h-8 w-8" />
                   </span>
-                  <span className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-[#1d2533] text-bjj-gold shadow-lg shadow-black/30">
+                  <span className="absolute -bottom-2 -right-2 flex h-10 w-10 items-center justify-center rounded-2xl border border-black/20 bg-[#1d2533] text-bjj-gold shadow-lg shadow-black/30">
                     <ImagePlus className="h-4 w-4" />
                   </span>
                 </button>
@@ -327,121 +438,68 @@ export default function ProfilePage() {
                 <div className="relative flex-1 text-center lg:text-left">
                   <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
                     <p className="text-xs font-black uppercase tracking-[0.24em] text-bjj-gold">BJJ Profil</p>
-                  {nationalityFlagUrl ? (
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/10 px-3 py-1 text-xs font-semibold text-white/80">
-                      <img src={nationalityFlagUrl} alt={nationalityLabel ?? 'Flagge'} className="h-4 w-6 rounded-[4px] object-cover" />
-                      <span>{nationalityLabel}</span>
-                    </span>
-                  ) : null}
                   </div>
                   <div className="mt-3 flex items-center justify-center gap-3 lg:justify-start">
                     {nationalityFlagUrl ? (
-                      <span
-                        className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/20 sm:h-14 sm:w-14"
-                        aria-label={nationalityLabel ?? 'Nationalitaet'}
-                        title={nationalityLabel ?? 'Nationalitaet'}
-                      >
-                        <img src={nationalityFlagUrl} alt={nationalityLabel ?? 'Flagge'} className="h-7 w-7 rounded-full object-cover sm:h-8 sm:w-8" />
-                      </span>
+                      <img 
+                        src={nationalityFlagUrl} 
+                        alt={nationalityLabel ?? 'Nationalität'} 
+                        className="h-8 w-12 rounded-[4px] object-cover"
+                      />
                     ) : null}
                     <h1 className="text-4xl font-black uppercase italic tracking-[-0.04em] text-white sm:text-5xl xl:text-6xl">
                       {displayName}
                     </h1>
                   </div>
-                  <p className="mt-2 text-sm font-medium tracking-[0.04em] text-bjj-muted">
-                    {profile?.email ?? 'Keine E-Mail gefunden'}
-                  </p>
-                  <div className="mt-4 inline-flex max-w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left">
-                    <Globe2 className="h-4 w-4 shrink-0 text-bjj-gold" />
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/35">Aktuelles Gym</p>
-                      <p className="truncate text-sm font-semibold text-white/85">
-                        {gymDisplayName ?? 'Noch kein Gym hinterlegt'}
-                      </p>
-                      {profile?.gym_location ? (
-                        <p className="truncate text-xs text-bjj-muted">{profile.gym_location}</p>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="mt-5 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
                     <span className="inline-flex items-center gap-2 rounded-full border border-bjj-gold/20 bg-bjj-gold/10 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-bjj-gold">
                       <Shield className="h-4 w-4" />
                       {profile?.belt ?? 'White Belt'}
                     </span>
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white/70">
+                    <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-black/20 bg-black/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white/70">
+                      <Globe2 className="h-4 w-4 shrink-0 text-bjj-gold" />
+                      <span className="max-w-[20rem] truncate">{gymDisplayName ?? 'Kein Gym hinterlegt'}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-black/20 bg-black/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white/70">
                       <Sparkles className="h-4 w-4 text-bjj-gold" />
                       {archetype.name}
                     </span>
                   </div>
                 </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                <div className="rounded-[1.5rem] border border-white/8 bg-black/15 px-5 py-5 backdrop-blur-sm transition hover:border-bjj-gold/20 hover:bg-black/25">
-                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/35">Videos angeschaut</p>
-                  <div className="mt-3 flex items-end gap-2">
-                    <span className="text-4xl font-black text-white">{watchedCount}</span>
-                    <PlayCircle className="mb-1 h-5 w-5 text-bjj-gold/50" />
-                  </div>
-                </div>
-                <div className="rounded-[1.5rem] border border-white/8 bg-black/15 px-5 py-5 backdrop-blur-sm transition hover:border-bjj-gold/20 hover:bg-black/25">
-                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/35">Aktuelles Level</p>
-                  <div className="mt-3 flex items-end gap-2">
-                    <span className="text-4xl font-black text-white">{level}</span>
-                    <span className="mb-1 text-[10px] font-black uppercase tracking-[0.22em] text-bjj-gold">Lvl Up</span>
-                  </div>
-                </div>
-                <div className="rounded-[1.5rem] border border-white/8 bg-black/15 px-5 py-5 backdrop-blur-sm transition hover:border-bjj-gold/20 hover:bg-black/25">
-                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/35">Verbunden</p>
-                  <div className="mt-3 flex items-end gap-2">
-                    <span className="text-4xl font-black text-white">{connectedProvidersCount}</span>
-                    <span className="mb-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/40">Accounts</span>
-                  </div>
-                </div>
-              </div>
             </div>
 
-            <div className="relative mt-8 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-              <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.035)_0%,rgba(0,0,0,0.14)_100%)] p-6">
+            <div className="hidden relative mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+              <div className="rounded-[1.55rem] border border-black/20 bg-[linear-gradient(180deg,rgba(255,255,255,0.02)_0%,rgba(0,0,0,0.18)_100%)] p-4">
                 <div className="flex items-center gap-3 text-xs font-black uppercase tracking-[0.24em] text-bjj-gold">
                   <Globe2 className="h-4 w-4" />
-                  Nationalitaet
+                  Nationalität
                 </div>
-                <h2 className="mt-4 text-2xl font-black tracking-[-0.03em] text-white">Flagge und Herkunft sichtbar machen</h2>
-                <p className="mt-3 max-w-xl text-sm leading-relaxed text-bjj-muted">
-                  Waehle dein Heimatland aus. Deine Nationalflagge erscheint danach direkt im Profil und gibt dem Bereich mehr Charakter.
+                <h2 className="mt-2 text-lg font-black tracking-[-0.03em] text-white">Im Onboarding festgelegt</h2>
+                <p className="mt-1 max-w-xl text-sm leading-relaxed text-bjj-muted">
+                  Deine Nationalität wird im Onboarding einmal gesetzt und hier nur noch angezeigt.
                 </p>
-                <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                  <select
-                    value={nationalityDraft}
-                    onChange={(event) => setNationalityDraft(event.target.value)}
-                    className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-[#111827] px-4 py-4 text-sm font-semibold text-white outline-none transition focus:border-bjj-gold/40"
-                  >
-                    <option value="">Land auswaehlen</option>
-                    {COUNTRY_OPTIONS.map((country) => (
-                      <option key={country.code} value={country.code}>
-                        {country.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void saveNationality()}
-                    disabled={savingNationality}
-                    className="rounded-2xl bg-[linear-gradient(135deg,#b86d45,#7c452d)] px-6 py-4 text-sm font-black uppercase tracking-[0.16em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {savingNationality ? 'Speichert...' : 'Aenderungen speichern'}
-                  </button>
+                <div className="mt-3 rounded-2xl border border-black/20 bg-[#111827] px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    {nationalityFlagUrl ? (
+                      <img src={nationalityFlagUrl} alt={nationalityLabel ?? 'Flagge'} className="h-5 w-7 rounded-[4px] object-cover" />
+                    ) : (
+                      <span className="inline-flex h-5 w-7 rounded-[4px] bg-black/20" />
+                    )}
+                    <div>
+                      <p className="text-sm font-semibold text-white">{nationalityLabel ?? 'Noch keine Nationalität gesetzt'}</p>
+                      <p className="text-xs text-bjj-muted">Änderbar nur über den Onboarding-Flow</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.035)_0%,rgba(0,0,0,0.14)_100%)] p-6">
+              <div className="rounded-[1.55rem] border border-black/20 bg-[linear-gradient(180deg,rgba(255,255,255,0.02)_0%,rgba(0,0,0,0.18)_100%)] p-4">
                 <p className="text-xs font-black uppercase tracking-[0.24em] text-bjj-gold">Social Media</p>
-                <h2 className="mt-4 text-2xl font-black tracking-[-0.03em] text-white">Verbindungen verwalten</h2>
-                <p className="mt-3 text-sm leading-relaxed text-bjj-muted">
+                <h2 className="mt-2 text-lg font-black tracking-[-0.03em] text-white">Verbindungen verwalten</h2>
+                <p className="mt-1 text-sm leading-relaxed text-bjj-muted">
                   Verbinde deine Accounts fuer Avatar, Login und spaetere Social Features. Wir fragen erst beim Klick nach einer Freigabe.
                 </p>
-                <div className="mt-6 grid grid-cols-2 gap-3">
+                <div className="mt-3 grid grid-cols-2 gap-2.5">
                   {CONNECT_PROVIDERS.map((entry) => {
                     const isConnected =
                       (entry.id === 'youtube' && connectedProviders.has('google')) ||
@@ -454,16 +512,16 @@ export default function ProfilePage() {
                         type="button"
                         onClick={() => void handleConnectAccount(entry)}
                         disabled={connectingProvider === entry.id}
-                        className={`group flex aspect-square flex-col items-center justify-center rounded-[1.5rem] border p-4 text-center transition ${
+                        className={`group flex min-h-[108px] flex-col items-center justify-center rounded-[1.25rem] border p-3 text-center transition ${
                           isConnected
                             ? 'border-bjj-gold/30 bg-bjj-gold/10'
-                            : 'border-white/8 bg-[#111827]/80 hover:-translate-y-0.5 hover:border-bjj-gold/30 hover:bg-[#151d2a]'
+                            : 'border-black/20 bg-[#111827]/80 hover:-translate-y-0.5 hover:border-bjj-gold/30 hover:bg-[#151d2a]'
                         } ${connectingProvider === entry.id ? 'cursor-not-allowed opacity-70' : ''}`}
                         aria-label={entry.label}
                         title={entry.label}
                       >
                         <div className="flex flex-col items-center gap-2">
-                          <Icon className={`h-6 w-6 transition duration-200 group-hover:scale-110 ${entry.accent}`} />
+                          <Icon className={`h-5 w-5 transition duration-200 group-hover:scale-110 ${entry.accent}`} />
                           <span className="text-[11px] font-black uppercase tracking-[0.18em] text-white/70">{entry.label}</span>
                           <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">
                             {isConnected ? 'Verbunden' : entry.shortLabel}
@@ -475,6 +533,69 @@ export default function ProfilePage() {
                 </div>
               </div>
             </div>
+
+            <div className="relative mt-6">
+              <div className="rounded-[1.55rem] border border-black/20 bg-[linear-gradient(180deg,rgba(255,255,255,0.02)_0%,rgba(0,0,0,0.18)_100%)] p-4">
+                <div className="flex items-center gap-3 text-xs font-black uppercase tracking-[0.24em] text-bjj-gold">
+                  <Globe2 className="h-4 w-4" />
+                  Social Links
+                </div>
+                <h2 className="mt-2 text-lg font-black tracking-[-0.03em] text-white">Deine oeffentlichen Profile</h2>
+                <p className="mt-1 text-sm leading-relaxed text-bjj-muted">
+                  Hinterlege deine Links einzeln, damit andere direkt zu deinen Kanaelen springen koennen.
+                </p>
+                <div className="mt-3 rounded-2xl border border-black/20 bg-[#111827] p-4">
+                  <div className="flex flex-col gap-3">
+                    {SOCIAL_LINK_FIELDS.map(({ key, label, placeholder, Icon, accent }) => {
+                      const savedValue = profile?.[`${key}_url` as keyof ProfileData]
+                      const currentDraft = socialLinkDrafts[key]
+                      const normalizedDraft = normalizeSocialUrl(currentDraft)
+                      const normalizedSaved = typeof savedValue === 'string' ? savedValue : null
+                      const hasChanges = normalizedDraft !== normalizedSaved
+                      const isSaving = savingSocialLinkId === key
+
+                      return (
+                        <div
+                          key={key}
+                          className="flex items-center gap-3 rounded-[1.35rem] bg-[linear-gradient(180deg,rgba(14,18,26,0.9),rgba(10,13,20,0.88))] px-3 py-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
+                        >
+                          <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/[0.04] ${accent}`}>
+                            <Icon className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-white/55">{label}</p>
+                            <input
+                              value={socialLinkDrafts[key]}
+                              onChange={(event) =>
+                                setSocialLinkDrafts((current) => ({
+                                  ...current,
+                                  [key]: event.target.value,
+                                }))
+                              }
+                              placeholder={placeholder}
+                              className="mt-1 w-full border-0 bg-transparent px-0 py-0 text-sm text-white outline-none placeholder:text-white/24"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void saveSocialLink(key)}
+                            disabled={isSaving || !hasChanges}
+                            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition ${
+                              hasChanges
+                                ? 'bg-bjj-gold/12 text-bjj-gold hover:bg-bjj-gold/18'
+                                : 'bg-white/[0.04] text-white/38'
+                            } ${isSaving || !hasChanges ? 'cursor-default' : ''}`}
+                            aria-label={hasChanges ? `${label} speichern` : `${label} bearbeiten`}
+                          >
+                            {hasChanges ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {connectMessage && (
@@ -482,6 +603,8 @@ export default function ProfilePage() {
               {connectMessage}
             </div>
           )}
+
+          <ProfileSavedClips />
         </section>
       </div>
 

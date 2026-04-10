@@ -8,9 +8,8 @@ export const MVP_PLAN_IDS = [
   'node-2-guard-entry',
   'node-3-dlr-connection',
   'node-4-dlr-retention',
-  'node-5-dlr-off-balance',
 ] as const
-export const MVP_PHASE_LABELS = ['Identity', 'Entry', 'Position', 'Retention', 'Off-Balance'] as const
+export const MVP_PHASE_LABELS = ['Leg Entry', 'Leg Control', 'Leg Isolation', 'Submission'] as const
 
 export function getNodeById(id: string) {
   return LONG_FLEXIBLE_GUARD_TREE.find((node) => node.id === id)

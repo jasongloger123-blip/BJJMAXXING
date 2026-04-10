@@ -1,4 +1,5 @@
-import { getCurrentPlanNode, getPlanNodes } from '@/lib/nodes'
+import type { ResolvedGameplan } from '@/lib/gameplans'
+import { getNodeById } from '@/lib/nodes'
 
 export type ClipResult = 'relevant' | 'not_yet' | 'known' | 'later' | 'irrelevant'
 
@@ -67,9 +68,119 @@ function getPhaseCategory(title: string) {
   return 'A-Plan'
 }
 
-export function buildStartQueue(completedIds: string[], events: QueueEvent[]) {
-  const planNodes = getPlanNodes()
-  const currentNode = getCurrentPlanNode(completedIds)
+function createPlanFallbackCard(
+  planNode: NonNullable<ResolvedGameplan['nodes'][string]>,
+  type: QueueCard['type'],
+  badge: string,
+  helperText: string
+): QueueCard {
+  return {
+    id: `${planNode.id}-${type}`,
+    nodeId: planNode.sourceNodeId ?? planNode.id,
+    type,
+    badge,
+    title: type === 'fix' ? `Fix: ${planNode.title}` : planNode.title,
+    principle:
+      type === 'fix'
+        ? `Arbeite heute gezielt an den typischen Fehlern in ${planNode.title}.`
+        : planNode.outcome || planNode.description || `${planNode.title} sauber in deinen Plan integrieren.`,
+    drill: planNode.description || 'Diese Technik als naechsten Schritt im Gameplan aufbauen.',
+    sparringGoal: planNode.outcome || `Suche ${planNode.title} bewusst in deinen Runden.`,
+    clipTitle: planNode.title,
+    clipUrl: '',
+    clipSource: 'external',
+    clipWindow: '',
+    categoryTag: getPhaseCategory(planNode.title),
+    levelTag: type === 'review' ? 'Review' : type === 'fix' ? 'Fix' : 'Gameplan',
+    description: planNode.description || planNode.outcome || `${planNode.title} ist Teil deines aktuellen Gameplans.`,
+    keyPoints: [
+      {
+        label: 'Gameplan',
+        items: [planNode.label || planNode.title],
+      },
+      ...(planNode.focus?.length
+        ? [
+            {
+              label: 'Fokus',
+              items: planNode.focus,
+            },
+          ]
+        : []),
+    ],
+    comments: [],
+    helperText,
+  }
+}
+
+export function buildStartQueue(completedIds: string[], events: QueueEvent[], plan?: ResolvedGameplan | null) {
+  if (!plan) {
+    return []
+  }
+
+  const mappedActivePlanNode = plan.unlockSummary.currentNodeId ? plan.nodes[plan.unlockSummary.currentNodeId] : null
+  const mappedCurrentNode = mappedActivePlanNode ? getNodeById(mappedActivePlanNode.sourceNodeId ?? mappedActivePlanNode.id) : null
+  const planPathNodes = plan.mainPath
+    .map((nodeId) => plan.nodes[nodeId])
+    .filter((node): node is NonNullable<typeof node> => Boolean(node))
+  const mappedPlanNodes = plan
+    ? planPathNodes
+        .map((node) => getNodeById(node.sourceNodeId ?? node.id))
+        .filter((node): node is NonNullable<typeof node> => Boolean(node))
+    : []
+
+  if (!mappedActivePlanNode && planPathNodes.length === 0) {
+    return []
+  }
+
+  const validationPending = Boolean(
+    plan.unlockSummary.validationPendingNodeId &&
+    plan.unlockSummary.currentSourceNodeId === (mappedCurrentNode?.id ?? mappedActivePlanNode?.sourceNodeId ?? mappedActivePlanNode?.id)
+  )
+
+  if (!mappedCurrentNode || mappedPlanNodes.length === 0) {
+    const activePlanNode = mappedActivePlanNode ?? planPathNodes[0]
+    if (!activePlanNode) {
+      return []
+    }
+
+    const previousPlanNode =
+      [...planPathNodes]
+        .reverse()
+        .find((node) => completedIds.includes(node.sourceNodeId ?? node.id) && (node.sourceNodeId ?? node.id) !== (activePlanNode.sourceNodeId ?? activePlanNode.id)) ?? null
+
+    const cards: QueueCard[] = [
+      createPlanFallbackCard(
+        activePlanNode,
+        'main',
+        validationPending ? 'Heute - Validierung' : 'Heute - Pflicht',
+        validationPending
+          ? 'Dieser Schritt ist fast fertig. Es fehlt nur noch die Validierung fuer den naechsten Unlock.'
+          : 'Diese Technik ist gerade dein naechster Schritt im aktiven Gameplan.'
+      ),
+      createPlanFallbackCard(
+        activePlanNode,
+        'fix',
+        'Fehler-Fix',
+        'Solange noch kein Startseiten-Clip hinterlegt ist, zeigt dir die App hier den gleichen Gameplan-Schritt als Fokuskarte.'
+      ),
+    ]
+
+    if (previousPlanNode) {
+      cards.push(
+        createPlanFallbackCard(
+          previousPlanNode,
+          'review',
+          'Review',
+          'Wiederholung aus deinem bereits aufgebauten Gameplan.'
+        )
+      )
+    }
+
+    return cards.slice(0, 3)
+  }
+
+  const planNodes = mappedPlanNodes
+  const currentNode = mappedCurrentNode
   const reviewAnchorNode =
     [...planNodes].reverse().find((node) => completedIds.includes(node.id)) ?? planNodes[planNodes.length - 1]
   const activeNode = currentNode ?? reviewAnchorNode
@@ -94,7 +205,7 @@ export function buildStartQueue(completedIds: string[], events: QueueEvent[]) {
       id: `${activeNode.id}-main`,
       nodeId: activeNode.id,
       type: 'main',
-      badge: currentNode ? 'Heute - Pflicht' : 'Heute - Review',
+      badge: validationPending ? 'Heute - Validierung' : currentNode ? 'Heute - Pflicht' : 'Heute - Review',
       title: activeNode.title,
       principle: activeNode.why,
       drill: activeNode.drill,
@@ -102,9 +213,9 @@ export function buildStartQueue(completedIds: string[], events: QueueEvent[]) {
       clipTitle: activeNode.videos[0]?.title ?? activeNode.title,
       clipUrl: mainClipUrl,
       clipSource: getClipSource(mainClipUrl),
-      clipWindow: '0:12-0:48',
+      clipWindow: '',
       categoryTag: getPhaseCategory(activeNode.title),
-      levelTag: currentNode ? 'Anfaenger' : 'Review',
+      levelTag: validationPending ? 'Validierung' : currentNode ? 'Anfaenger' : 'Review',
       description: activeNode.why,
       keyPoints:
         activeNode.id === 'node-1-guard-identity'
@@ -162,7 +273,9 @@ export function buildStartQueue(completedIds: string[], events: QueueEvent[]) {
           : [],
       comments: [],
       helperText: currentNode
-        ? 'Die App zeigt dir genau das naechste Reel fuer deinen aktuellen Fokus.'
+        ? validationPending
+          ? 'Dein aktueller Schritt ist inhaltlich fertig, jetzt fehlt noch die Validierung fuer den naechsten Unlock.'
+          : 'Die App zeigt dir genau das naechste Reel fuer deinen aktuellen Fokus.'
         : 'Dein A-Plan ist durch. Jetzt bleibt dein Feed im Wiederholungs- und Vertiefungsmodus aktiv.',
     },
   ]
@@ -181,7 +294,7 @@ export function buildStartQueue(completedIds: string[], events: QueueEvent[]) {
     clipTitle: activeNode.videos[1]?.title ?? activeNode.videos[0]?.title ?? activeNode.title,
     clipUrl: fixClipUrl,
     clipSource: getClipSource(fixClipUrl),
-    clipWindow: '0:18-0:52',
+      clipWindow: '',
     categoryTag: getPhaseCategory(activeNode.title),
     levelTag: currentNode ? 'Fix' : 'Variation',
     description: latestFailedEvent
@@ -206,7 +319,7 @@ export function buildStartQueue(completedIds: string[], events: QueueEvent[]) {
       clipTitle: previousNode.videos[0]?.title ?? previousNode.title,
       clipUrl: reviewClipUrl,
       clipSource: getClipSource(reviewClipUrl),
-      clipWindow: '0:10-0:42',
+      clipWindow: '',
       categoryTag: getPhaseCategory(previousNode.title),
       levelTag: 'Review',
       description: 'Kurze Wiederholung aus deinem bereits gelernten Path, damit nichts wieder wegbricht.',

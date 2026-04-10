@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: example-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: example-service-role-key
+          ADMIN_EMAILS: admin@example.com
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_example
+          STRIPE_SECRET_KEY: sk_test_example
+          STRIPE_WEBHOOK_SECRET: whsec_example
+          STRIPE_PRICE_GUARD_PACK: price_example_guard
+          STRIPE_PRICE_MEMBERSHIP: price_example_membership
+          STRIPE_PRICE_PREMIUM_REVIEW: price_example_review
+          NEXT_PUBLIC_APP_URL: https://example.com

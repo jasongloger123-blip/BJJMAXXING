@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import PublicAuthShell from '@/components/PublicAuthShell'
-import { clearPendingArchetypeResult, readPendingArchetypeResult, saveArchetypeResult } from '@/lib/public-archetype-result'
+import { readPendingArchetypeResult } from '@/lib/public-archetype-result'
 
 function getSafeNextPath(next: string | null) {
   if (!next || !next.startsWith('/')) {
@@ -15,7 +15,7 @@ function getSafeNextPath(next: string | null) {
   return next
 }
 
-export default function RegisterPage() {
+function RegisterPageContent() {
   const supabase = createClient()
   const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
@@ -60,22 +60,8 @@ export default function RegisterPage() {
     const pendingResult = readPendingArchetypeResult()
 
     if (pendingResult) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (user) {
-        await supabase.from('user_profiles').upsert({
-          id: user.id,
-          primary_archetype: pendingResult.primary.id,
-          secondary_archetype: pendingResult.secondary.id,
-        })
-        saveArchetypeResult(pendingResult, false)
-        clearPendingArchetypeResult()
-        window.dispatchEvent(new Event('profile-ready-changed'))
-        window.location.assign('/archetype-result')
-        return
-      }
+      window.location.assign('/archetype-result')
+      return
     }
 
     window.location.assign(nextPath)
@@ -141,5 +127,13 @@ export default function RegisterPage() {
         </button>
       </form>
     </PublicAuthShell>
+  )
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0f1419]" />}>
+      <RegisterPageContent />
+    </Suspense>
   )
 }

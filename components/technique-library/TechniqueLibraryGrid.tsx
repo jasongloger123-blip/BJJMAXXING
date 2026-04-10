@@ -1,104 +1,120 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowRight, Lock, Play } from 'lucide-react'
+import { Flame, Lock } from 'lucide-react'
 import type { TechniqueItem } from '@/components/technique-library/types'
-
-const ratingStars = (value: number) =>
-  Array.from({ length: 5 }).map((_, index) => ({
-    id: index,
-    active: index < value,
-  }))
 
 type TechniqueLibraryGridProps = {
   techniques: TechniqueItem[]
 }
 
+const STAGE_CARD_STYLES: Record<
+  TechniqueItem['stage'],
+  {
+    shell: string
+    imageOverlay: string
+    body: string
+    meta: string
+    glow: string
+  }
+> = {
+  position: {
+    shell:
+      'bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0)),linear-gradient(180deg,#121d31,#151b2a_52%,#131721)] shadow-[0_0_0_1px_rgba(93,136,255,0.18),0_22px_52px_rgba(20,39,86,0.16)]',
+    imageOverlay: 'from-[#131721] via-[#131721]/26 to-transparent',
+    body: 'bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0)),linear-gradient(180deg,#182235,#121722)]',
+    meta: 'bg-[#ffffff08] text-white/52',
+    glow: 'hover:shadow-[0_0_0_1px_rgba(93,136,255,0.24),0_30px_60px_rgba(20,39,86,0.24)]',
+  },
+  pass: {
+    shell:
+      'bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0)),linear-gradient(180deg,#241813,#1c1714_52%,#171418)] shadow-[0_0_0_1px_rgba(201,122,66,0.18),0_22px_52px_rgba(108,53,20,0.18)]',
+    imageOverlay: 'from-[#171418] via-[#171418]/28 to-transparent',
+    body: 'bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0)),linear-gradient(180deg,#211713,#181416)]',
+    meta: 'bg-[#ffffff08] text-white/52',
+    glow: 'hover:shadow-[0_0_0_1px_rgba(201,122,66,0.24),0_30px_60px_rgba(108,53,20,0.26)]',
+  },
+  submission: {
+    shell:
+      'bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0)),linear-gradient(180deg,#142216,#141d17_52%,#131816)] shadow-[0_0_0_1px_rgba(111,185,111,0.18),0_22px_52px_rgba(26,61,31,0.16)]',
+    imageOverlay: 'from-[#131816] via-[#131816]/28 to-transparent',
+    body: 'bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0)),linear-gradient(180deg,#18251a,#131816)]',
+    meta: 'bg-[#ffffff08] text-white/52',
+    glow: 'hover:shadow-[0_0_0_1px_rgba(111,185,111,0.24),0_30px_60px_rgba(26,61,31,0.24)]',
+  },
+}
+
 export function TechniqueLibraryGrid({ techniques }: TechniqueLibraryGridProps) {
   if (techniques.length === 0) {
     return (
-      <section className="mt-8 rounded-[2rem] border border-dashed border-white/12 bg-white/[0.02] px-6 py-14 text-center">
+      <section className="mt-8 rounded-[2rem] border border-white/[0.05] bg-[#13141b] px-6 py-14 text-center">
         <p className="text-[10px] font-bold uppercase tracking-[0.34em] text-white/38">No Match</p>
         <h2 className="mt-4 text-3xl font-black text-white">Keine Technik trifft diese Filterkombination.</h2>
         <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-white/55">
-          Nimm einen Fighter raus, setze die Verfuegbarkeit zurueck oder lockere den Suchbegriff. Die Library ist jetzt streng genug, um leere Zustande klar zu zeigen.
+          Entferne einen Coach oder lockere die Kategorie, dann fuellt sich das Grid direkt wieder.
         </p>
       </section>
     )
   }
 
   return (
-    <section className="grid gap-8 py-10 md:grid-cols-2 xl:grid-cols-3">
+    <section className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {techniques.map((tech) => {
-        const Icon = tech.icon
+        const stageStyle = STAGE_CARD_STYLES[tech.stage]
         const card = (
           <>
-            <div className="relative aspect-video overflow-hidden">
-              {tech.locked ? (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/75">
-                  <Lock className="h-6 w-6 text-white/40" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-white/40">Locked Node</span>
-                </div>
-              ) : null}
-
+            <div className="relative aspect-[16/8.2] overflow-hidden">
               <img
                 src={tech.image}
                 alt={tech.title}
-                className="h-full w-full object-cover opacity-70 transition duration-700 group-hover:scale-105 group-hover:opacity-90"
+                className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0d1117] via-transparent to-transparent" />
-              <span className={`absolute left-4 top-4 rounded-md border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.2em] ${tech.tagColor}`}>
+              <div className={`absolute inset-0 bg-gradient-to-t ${stageStyle.imageOverlay} to-transparent`} />
+
+              <span className={`absolute left-4 top-4 rounded-xl px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.22em] backdrop-blur-md ${tech.tagColor}`}>
                 {tech.tag}
               </span>
-              {!tech.locked ? (
-                <button className="absolute inset-0 m-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-white/10 opacity-0 backdrop-blur-sm transition group-hover:opacity-100">
-                  <Play className="h-5 w-5 text-white" />
-                </button>
+
+              <div className="absolute bottom-4 left-4 flex items-center gap-2.5">
+                <div className="h-9 w-9 overflow-hidden rounded-full border border-white/15 bg-white/10 shadow-[0_8px_18px_rgba(0,0,0,0.28)]">
+                  <img src={tech.coachAvatar} alt={tech.fighter} className="h-full w-full object-cover" />
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-[0.16em] text-white">{tech.fighter}</span>
+              </div>
+
+              {tech.locked ? (
+                <div className="absolute right-4 top-4 inline-flex items-center gap-2 rounded-full bg-black/45 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-white/74 backdrop-blur-md">
+                  <Lock className="h-3.5 w-3.5" />
+                  Locked
+                </div>
               ) : null}
             </div>
 
-            <div className="space-y-4 p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-black uppercase tracking-tight text-white">{tech.title}</h3>
-                  <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">
-                    {tech.fighter} | {tech.creator}
-                  </p>
-                </div>
-                <Icon className="h-5 w-5 text-white/40" />
-              </div>
+            <div className={`${stageStyle.body} p-5`}>
+              <h3 className="text-[1.45rem] font-black leading-[1.1] text-white">{tech.title}</h3>
+              <p className="mt-3 text-[14px] leading-6 text-white/58">{tech.description}</p>
 
-              <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
-                <span>Level {tech.level}</span>
-                <div className="flex items-center gap-0.5 text-bjj-gold">
-                  {ratingStars(Math.min(tech.level, 5)).map((star) => (
-                    <span key={star.id} className={star.active ? 'text-bjj-gold' : 'text-white/20'}>
-                      *
-                    </span>
-                  ))}
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                <div className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] ${stageStyle.meta}`}>
+                  <Flame className="h-3.5 w-3.5 text-[#f59e0b]" />
+                  {tech.difficulty}
                 </div>
-                <span className="ml-auto">{tech.duration}</span>
-              </div>
-
-              <div className="flex items-center justify-between border-t border-white/5 pt-4">
-                <div>
-                  <p className="text-[9px] uppercase tracking-[0.2em] text-white/30">Prerequisite</p>
-                  <p className="mt-1 text-[11px] text-white/60">{tech.prereq}</p>
-                </div>
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-bjj-gold/20 bg-bjj-gold/10 text-bjj-gold transition group-hover:bg-bjj-gold group-hover:text-bjj-coal">
-                  <ArrowRight className="h-5 w-5" />
+                <div className={`inline-flex items-center rounded-full px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] ${stageStyle.meta}`}>
+                  {tech.style}
                 </div>
               </div>
             </div>
           </>
         )
 
-        const cardClasses = `group relative overflow-hidden rounded-3xl border border-white/5 bg-[#0d1117] transition ${
-          tech.locked ? 'opacity-45 grayscale' : 'hover:-translate-y-1 hover:border-bjj-gold/40'
+        const cardClasses = `group block overflow-hidden rounded-2xl transition-all duration-300 ease-out ${stageStyle.shell} ${
+          tech.locked ? 'opacity-70' : `hover:-translate-y-1 ${stageStyle.glow}`
         }`
 
-        return tech.nodeId ? (
-          <Link key={tech.id} href={`/node/${tech.nodeId}`} className={cardClasses}>
+        const techniqueHref = tech.techniqueId ? `/technique/${tech.techniqueId}` : null
+
+        return techniqueHref && !tech.locked ? (
+          <Link key={tech.id} href={techniqueHref} className={cardClasses}>
             {card}
           </Link>
         ) : (

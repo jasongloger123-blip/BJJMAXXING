@@ -55,6 +55,37 @@ Diese Aufteilung ist fuer GitHub sinnvoll, weil Produktlogik, UI und Infrastrukt
 - `NEXT_PUBLIC_APP_URL`
 - `GOOGLE_MAPS_API_KEY`
 
+## Release auf Vercel
+
+Empfohlener Produktionsweg fuer dieses Projekt:
+
+- GitHub als Source of Truth
+- Vercel fuer Hosting und Deployments
+- Supabase fuer Auth, DB und Storage
+- Stripe fuer Checkout und Webhooks
+
+Empfohlener Minimal-Workflow:
+
+1. Repository auf GitHub pushen
+2. Projekt in Vercel importieren
+3. Produktions-Env-Variablen in Vercel setzen
+4. Domain mit Vercel verbinden
+5. Supabase Auth Redirects auf Produktions-Domain setzen
+6. Stripe Webhook auf `/api/stripe/webhook` anlegen
+7. Push auf `main` als Production-Deploy nutzen
+
+Detaillierte Schritt-fuer-Schritt-Anleitung:
+
+- [Vercel Release Guide](docs/vercel-release.md)
+
+Verfuegbare Checks:
+
+```bash
+npm run typecheck
+npm run build
+npm run ci
+```
+
 ## GitHub-Ready
 
 Die Repository-Basis ist jetzt darauf ausgelegt, nur den eigentlichen Quellcode, Konfigurationen und Supabase-Migrationen zu versionieren. Lokale Secrets, Build-Artefakte und installierte Pakete bleiben draussen.

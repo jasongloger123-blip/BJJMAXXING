@@ -42,10 +42,32 @@ export const STRIPE_PRODUCTS = {
   },
 }
 
+function isPlaceholderStripeValue(value: string) {
+  const normalized = value.trim().toLowerCase()
+
+  return (
+    !normalized ||
+    normalized.startsWith('your_') ||
+    normalized.includes('placeholder') ||
+    normalized.endsWith('_xxx') ||
+    normalized === 'price_xxx'
+  )
+}
+
+export function hasValidStripeSecretKey() {
+  const secretKey = process.env.STRIPE_SECRET_KEY
+  return Boolean(secretKey && !isPlaceholderStripeValue(secretKey))
+}
+
+export function hasValidStripePrice(productKey: keyof typeof STRIPE_PRODUCTS) {
+  const priceId = process.env[STRIPE_PRODUCTS[productKey].priceEnvKey]
+  return Boolean(priceId && !isPlaceholderStripeValue(priceId))
+}
+
 export function getStripeServerClient() {
   const secretKey = process.env.STRIPE_SECRET_KEY
 
-  if (!secretKey) {
+  if (!secretKey || isPlaceholderStripeValue(secretKey)) {
     return null
   }
 

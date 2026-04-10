@@ -1,15 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowUpRight, Check, ChevronUp, MapPinned, MessageCircle, Play, Share2, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronUp, MapPinned, MessageCircle, Play, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { ARCHETYPES } from '@/lib/archetypes'
+import type { ResolvedGameplan } from '@/lib/gameplans'
 import { createClient } from '@/lib/supabase/client'
 import { waitForAuthenticatedUser } from '@/lib/supabase/auth-guard'
 import { buildStartQueue, type ClipResult, type QueueCard, type QueueEvent } from '@/lib/start-queue'
 import { YoutubeEmbed } from '@/components/YoutubeEmbed'
 import { getNodeById } from '@/lib/nodes'
+import { getFlagSvgUrl } from '@/lib/countries'
 
 type StartState = {
   userId: string
@@ -31,6 +33,12 @@ type ClipReply = {
   text: string
   meta: string
   avatarUrl?: string | null
+  nationality?: string | null
+  likes: number
+  dislikes: number
+  userReaction: 1 | -1 | null
+  replies: ClipReply[]
+  parentReplyId?: string | null
 }
 
 type ClipComment = {
@@ -40,6 +48,7 @@ type ClipComment = {
   text: string
   meta: string
   avatarUrl?: string | null
+  nationality?: string | null
   likes: number
   dislikes: number
   userReaction: 1 | -1 | null
@@ -77,6 +86,22 @@ type ProgressSnapshot = {
   validated?: boolean
   validated_at?: string | null
 } | null
+
+type QueueTransitionPhase = 'idle' | 'out' | 'prepare'
+
+function extractYoutubeId(url: string) {
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/)
+  return match?.[1] ?? null
+}
+
+function getClipPreviewImage(url: string) {
+  const youtubeId = extractYoutubeId(url)
+  if (youtubeId) {
+    return `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+  }
+
+  return null
+}
 
 function isMissingColumnError(error: { message?: string } | null, column: string) {
   const message = error?.message?.toLowerCase() ?? ''
@@ -148,9 +173,11 @@ export default function StartHome() {
   const [commentDraft, setCommentDraft] = useState('')
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
+  const [replyingToReply, setReplyingToReply] = useState<Record<string, boolean>>({})
   const [feedback, setFeedback] = useState<string | null>(null)
   const [usernameDraft, setUsernameDraft] = useState('')
   const [commentFeaturesReady, setCommentFeaturesReady] = useState(true)
+  const [activePlan, setActivePlan] = useState<ResolvedGameplan | null>(null)
   const [gymQuery, setGymQuery] = useState('')
   const [gymSuggestions, setGymSuggestions] = useState<GymSuggestion[]>([])
   const [gymLoading, setGymLoading] = useState(false)
@@ -165,6 +192,27 @@ export default function StartHome() {
     correct: string
   } | null>(null)
   const [validationFeedback, setValidationFeedback] = useState<string | null>(null)
+  const [displayCard, setDisplayCard] = useState<QueueCard | null>(null)
+  const [transitionPhase, setTransitionPhase] = useState<QueueTransitionPhase>('idle')
+  const [isFlying, setIsFlying] = useState(false)
+  const [isShaking, setIsShaking] = useState(false)
+  const [barPulseActive, setBarPulseActive] = useState(false)
+  const [progressCountFlash, setProgressCountFlash] = useState(false)
+  const [unlockSequence, setUnlockSequence] = useState<{ previousTitle: string; nextTitle: string; nextLabel: string } | null>(null)
+  const [flyingVideoStyle, setFlyingVideoStyle] = useState<CSSProperties | null>(null)
+  const videoShellRef = useRef<HTMLDivElement | null>(null)
+  const progressBarRef = useRef<HTMLDivElement | null>(null)
+  const swapTimerRef = useRef<number | null>(null)
+  const settleTimerRef = useRef<number | null>(null)
+  const unlockTimerRef = useRef<number | null>(null)
+  const hasInitializedDisplayCardRef = useRef(false)
+  const unlockSnapshotRef = useRef<{
+    currentNodeId: string | null
+    currentSourceNodeId: string | null
+    title: string | null
+    progressCompletedRules: number
+    progressTotalRules: number
+  } | null>(null)
 
   const loadState = useCallback(async () => {
     const user = await waitForAuthenticatedUser(supabase)
@@ -215,8 +263,26 @@ export default function StartHome() {
     void loadState()
   }, [loadState])
 
+  const loadActivePlan = useCallback(async () => {
+    try {
+      const response = await fetch('/api/gameplan/active', { cache: 'no-store' })
+      const payload = (await response.json()) as { plan?: ResolvedGameplan }
+      if (!response.ok || !payload.plan) {
+        setActivePlan(null)
+        return
+      }
+      setActivePlan(payload.plan)
+    } catch {
+      setActivePlan(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadActivePlan()
+  }, [loadActivePlan])
+
   const assignedArchetype = ARCHETYPES.find((item) => item.id === startState?.primaryArchetype) ?? null
-  const queue = useMemo(() => buildStartQueue(completedIds, events), [completedIds, events])
+  const queue = useMemo(() => buildStartQueue(completedIds, events, activePlan), [activePlan, completedIds, events])
   const primaryCard = queue[0]
   const hasGym = Boolean(startState?.gymPlaceId ?? startState?.gymName ?? startState?.gymUnlistedName)
   const displayName = startState?.username ?? startState?.fullName ?? startState?.email?.split('@')[0] ?? 'BJJ Athlete'
@@ -236,8 +302,142 @@ export default function StartHome() {
     const total = Math.max(flowSteps.length, 1)
     return Math.max(18, Math.min(100, Math.round((baseline / total) * 100)))
   }, [completedIds.length, validatedIds.length])
+  const visibleCard = displayCard ?? primaryCard ?? null
+  const activePlanNode = useMemo(() => {
+    const currentNodeId = activePlan?.unlockSummary.currentNodeId
+    if (!currentNodeId) return null
+    return activePlan?.nodes[currentNodeId] ?? null
+  }, [activePlan])
+  const currentTechniqueProgress = useMemo(() => {
+    if (activePlanNode) {
+      const completed = activePlanNode.progressCompletedRules ?? 0
+      const total = activePlanNode.progressTotalRules ?? 0
+      return {
+        completed,
+        total,
+        percent: total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0,
+      }
+    }
+
+    const fallbackNode = visibleCard ? getNodeById(visibleCard.nodeId) : null
+    return {
+      completed: 0,
+      total: fallbackNode?.completionRules.length ?? 0,
+      percent: 0,
+    }
+  }, [activePlanNode, visibleCard])
+  const visiblePreviewImage = visibleCard ? getClipPreviewImage(visibleCard.clipUrl) : null
   const spotlightDetail = quickDetails[0]
   const supportDetail = quickDetails[1]
+
+  useEffect(() => {
+    if (!activePlan) return
+
+    const currentNodeId = activePlan.unlockSummary.currentNodeId
+    const currentSourceNodeId = activePlan.unlockSummary.currentSourceNodeId
+    const currentNode = currentNodeId ? activePlan.nodes[currentNodeId] ?? null : null
+    const nextSnapshot = {
+      currentNodeId,
+      currentSourceNodeId,
+      title: currentNode?.title ?? null,
+      progressCompletedRules: currentNode?.progressCompletedRules ?? 0,
+      progressTotalRules: currentNode?.progressTotalRules ?? 0,
+    }
+
+    const previousSnapshot = unlockSnapshotRef.current
+    unlockSnapshotRef.current = nextSnapshot
+
+    if (!previousSnapshot) {
+      return
+    }
+
+    const unlockedNewNode =
+      previousSnapshot.currentNodeId !== nextSnapshot.currentNodeId ||
+      previousSnapshot.currentSourceNodeId !== nextSnapshot.currentSourceNodeId
+    const previousNodeFullyCharged =
+      previousSnapshot.progressTotalRules > 0 &&
+      previousSnapshot.progressCompletedRules === previousSnapshot.progressTotalRules
+
+    if (!unlockedNewNode || !previousNodeFullyCharged || !currentNode) {
+      return
+    }
+
+    setUnlockSequence({
+      previousTitle: previousSnapshot.title ?? 'Vorheriger Schritt',
+      nextTitle: currentNode.title,
+      nextLabel: currentNode.label,
+    })
+    triggerProgressPulse()
+
+    if (unlockTimerRef.current) {
+      window.clearTimeout(unlockTimerRef.current)
+    }
+
+    unlockTimerRef.current = window.setTimeout(() => {
+      setUnlockSequence(null)
+    }, 2400)
+  }, [activePlan])
+
+  useEffect(() => {
+    if (swapTimerRef.current) {
+      window.clearTimeout(swapTimerRef.current)
+      swapTimerRef.current = null
+    }
+    if (settleTimerRef.current) {
+      window.clearTimeout(settleTimerRef.current)
+      settleTimerRef.current = null
+    }
+    if (unlockTimerRef.current) {
+      window.clearTimeout(unlockTimerRef.current)
+      unlockTimerRef.current = null
+    }
+
+    if (!primaryCard) {
+      setDisplayCard(null)
+      setUnlockSequence(null)
+      hasInitializedDisplayCardRef.current = false
+      return
+    }
+
+    if (!hasInitializedDisplayCardRef.current || !displayCard) {
+      hasInitializedDisplayCardRef.current = true
+      setDisplayCard(primaryCard)
+      setTransitionPhase('idle')
+      return
+    }
+
+    if (displayCard.id === primaryCard.id) {
+      if (transitionPhase !== 'idle') {
+        setTransitionPhase('idle')
+      }
+      return
+    }
+
+    setTransitionPhase('out')
+
+    swapTimerRef.current = window.setTimeout(() => {
+      setDisplayCard(primaryCard)
+      setTransitionPhase('prepare')
+
+      settleTimerRef.current = window.setTimeout(() => {
+        setTransitionPhase('idle')
+      }, 50)
+    }, 400)
+  }, [displayCard, primaryCard, transitionPhase])
+
+  useEffect(() => {
+    return () => {
+      if (swapTimerRef.current) {
+        window.clearTimeout(swapTimerRef.current)
+      }
+      if (settleTimerRef.current) {
+        window.clearTimeout(settleTimerRef.current)
+      }
+      if (unlockTimerRef.current) {
+        window.clearTimeout(unlockTimerRef.current)
+      }
+    }
+  }, [])
 
   const loadComments = useCallback(async (clipKey: string) => {
     if (!startState) return
@@ -253,14 +453,49 @@ export default function StartHome() {
     }
 
     const commentIds = (commentData ?? []).map((entry) => entry.id)
-    const [{ data: reactionData, error: reactionError }, { data: replyData, error: replyError }] = commentIds.length
-      ? await Promise.all([
-          supabase.from('clip_comment_reactions').select('comment_id, user_id, value').in('comment_id', commentIds),
-          supabase.from('clip_comment_replies').select('id, comment_id, author_name, author_avatar_url, content, created_at').in('comment_id', commentIds).order('created_at', { ascending: true }),
-        ])
-      : [{ data: [] }, { data: [] }]
+    const userIds = Array.from(new Set((commentData ?? []).map((entry) => entry.user_id).filter(Boolean)))
+    
+    const [reactionsRes, repliesRes, replyReactionsRes, userProfilesRes] = await Promise.all([
+      commentIds.length ? supabase.from('clip_comment_reactions').select('comment_id, user_id, value').in('comment_id', commentIds) : { data: [], error: null },
+      commentIds.length ? supabase.from('clip_comment_replies').select('id, comment_id, user_id, author_name, author_avatar_url, content, created_at, parent_reply_id').in('comment_id', commentIds).order('created_at', { ascending: true }) : { data: [], error: null },
+      supabase.from('clip_comment_reply_reactions').select('reply_id, user_id, value'),
+      userIds.length ? supabase.from('user_profiles').select('id, nationality').in('id', userIds) : { data: [], error: null },
+    ])
 
-    setCommentFeaturesReady(!(reactionError || replyError))
+    const reactionData = reactionsRes.data ?? []
+    const replyData = repliesRes.data ?? []
+    const replyReactionData = replyReactionsRes.data ?? []
+    const userProfilesData = userProfilesRes.data ?? []
+    const reactionError = reactionsRes.error || repliesRes.error
+
+    // Map user_id to nationality
+    const userNationalityMap = new Map<string, string>()
+    userProfilesData.forEach((profile: any) => {
+      if (profile.id && profile.nationality) {
+        userNationalityMap.set(profile.id, profile.nationality)
+      }
+    })
+
+    setCommentFeaturesReady(!reactionError)
+
+    // Build nested reply structure
+    const buildReplyTree = (replies: any[], parentReplyId: string | null = null): ClipReply[] => {
+      const directReplies = replies.filter((r) => (r.parent_reply_id ?? null) === parentReplyId)
+      return directReplies.map((reply) => ({
+        id: reply.id,
+        author: reply.author_name,
+        avatarUrl: reply.author_avatar_url,
+        text: reply.content,
+        meta: formatRelativeTime(reply.created_at),
+        nationality: reply.user_id ? userNationalityMap.get(reply.user_id) ?? null : null,
+        likes: replyReactionData.filter((r: any) => r.reply_id === reply.id && r.value === 1).length,
+        dislikes: replyReactionData.filter((r: any) => r.reply_id === reply.id && r.value === -1).length,
+        userReaction: replyReactionData.find((r: any) => r.reply_id === reply.id && r.user_id === startState.userId)?.value ?? null,
+        replies: buildReplyTree(replies, reply.id),
+        parentReplyId: reply.parent_reply_id,
+      }))
+    }
+
     setComments((commentData ?? []).map((entry) => ({
       id: entry.id,
       userId: entry.user_id,
@@ -268,16 +503,11 @@ export default function StartHome() {
       avatarUrl: entry.author_avatar_url,
       text: entry.content,
       meta: formatRelativeTime(entry.created_at),
-      likes: (reactionData ?? []).filter((reaction: any) => reaction.comment_id === entry.id && reaction.value === 1).length,
-      dislikes: (reactionData ?? []).filter((reaction: any) => reaction.comment_id === entry.id && reaction.value === -1).length,
-      userReaction: (reactionData ?? []).find((reaction: any) => reaction.comment_id === entry.id && reaction.user_id === startState.userId)?.value ?? null,
-      replies: (replyData ?? []).filter((reply: any) => reply.comment_id === entry.id).map((reply: any) => ({
-        id: reply.id,
-        author: reply.author_name,
-        avatarUrl: reply.author_avatar_url,
-        text: reply.content,
-        meta: formatRelativeTime(reply.created_at),
-      })),
+      nationality: entry.user_id ? userNationalityMap.get(entry.user_id) ?? null : null,
+      likes: reactionData.filter((reaction: any) => reaction.comment_id === entry.id && reaction.value === 1).length,
+      dislikes: reactionData.filter((reaction: any) => reaction.comment_id === entry.id && reaction.value === -1).length,
+      userReaction: reactionData.find((reaction: any) => reaction.comment_id === entry.id && reaction.user_id === startState.userId)?.value ?? null,
+      replies: buildReplyTree(replyData.filter((r: any) => r.comment_id === entry.id)),
     })))
   }, [startState, supabase])
 
@@ -432,6 +662,70 @@ export default function StartHome() {
       setValidatedIds((current) => [...current, card.nodeId])
     }
     await loadState()
+    await loadActivePlan()
+  }
+
+  function triggerProgressPulse() {
+    setBarPulseActive(false)
+    setProgressCountFlash(false)
+
+    window.setTimeout(() => {
+      setBarPulseActive(true)
+      setProgressCountFlash(true)
+
+      window.setTimeout(() => setBarPulseActive(false), 700)
+      window.setTimeout(() => setProgressCountFlash(false), 650)
+    }, 10)
+  }
+
+  function buildFlyingVideoStyle() {
+    const videoRect = videoShellRef.current?.getBoundingClientRect()
+    const progressRect = progressBarRef.current?.getBoundingClientRect()
+
+    if (!videoRect || !progressRect) {
+      return null
+    }
+
+    const translateX = progressRect.left + progressRect.width / 2 - (videoRect.left + videoRect.width / 2)
+    const translateY = progressRect.top + progressRect.height / 2 - (videoRect.top + videoRect.height / 2)
+
+    return {
+      left: `${videoRect.left}px`,
+      top: `${videoRect.top}px`,
+      width: `${videoRect.width}px`,
+      height: `${videoRect.height}px`,
+      '--video-fall-x': `${translateX}px`,
+      '--video-fall-y': `${translateY}px`,
+    } as CSSProperties
+  }
+
+  function handleAnimatedQueueAction(result: ClipResult) {
+    if (!visibleCard || savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking) {
+      return
+    }
+
+    if (result === 'known' && !validatedIds.includes(visibleCard.nodeId)) {
+      const node = getNodeById(visibleCard.nodeId)
+      if (node?.validationQuestion && node.validationOptions?.length && node.validationCorrectAnswer) {
+        void submitQueueResult(visibleCard, result)
+        return
+      }
+    }
+
+    if (result === 'known') {
+      setFlyingVideoStyle(buildFlyingVideoStyle())
+      setIsFlying(true)
+      triggerProgressPulse()
+      window.setTimeout(() => {
+        setIsFlying(false)
+        setFlyingVideoStyle(null)
+      }, 820)
+    } else {
+      setIsShaking(true)
+      window.setTimeout(() => setIsShaking(false), 420)
+    }
+
+    void submitQueueResult(visibleCard, result)
   }
 
   async function handleValidationAnswer(option: string) {
@@ -595,18 +889,22 @@ export default function StartHome() {
     if (primaryCard) await loadComments(primaryCard.id)
   }
 
-  async function submitReply(commentId: string) {
+  async function submitReply(commentId: string, parentReplyId?: string) {
     if (!primaryCard || !replyDrafts[commentId]?.trim() || !startState) return
     setSubmittingReplyId(commentId)
     setFeedback(null)
     const authorName = startState.username ?? startState.fullName ?? startState.email?.split('@')[0] ?? 'BJJ Athlete'
-    const { error } = await supabase.from('clip_comment_replies').insert({
+    const insertData: any = {
       comment_id: commentId,
       user_id: startState.userId,
       author_name: authorName,
       author_avatar_url: startState.avatarUrl,
       content: replyDrafts[commentId].trim(),
-    })
+    }
+    if (parentReplyId) {
+      insertData.parent_reply_id = parentReplyId
+    }
+    const { error } = await supabase.from('clip_comment_replies').insert(insertData)
     setSubmittingReplyId(null)
     if (error) {
       setFeedback(`Antwort konnte nicht gespeichert werden: ${error.message}`)
@@ -615,6 +913,130 @@ export default function StartHome() {
     setReplyDrafts((current) => ({ ...current, [commentId]: '' }))
     setExpandedReplies((current) => ({ ...current, [commentId]: true }))
     await loadComments(primaryCard.id)
+  }
+
+  async function submitReplyReaction(replyId: string, value: 1 | -1) {
+    if (!startState) return
+    const { error } = await supabase.from('clip_comment_reply_reactions').upsert({ reply_id: replyId, user_id: startState.userId, value }, { onConflict: 'reply_id,user_id' })
+    if (error) {
+      setFeedback(`Reaktion konnte nicht gespeichert werden: ${error.message}`)
+      return
+    }
+    if (primaryCard) await loadComments(primaryCard.id)
+  }
+
+  async function submitNestedReply(commentId: string, parentReplyId: string) {
+    if (!primaryCard || !replyDrafts[parentReplyId]?.trim() || !startState) return
+    setSubmittingReplyId(parentReplyId)
+    setFeedback(null)
+    const authorName = startState.username ?? startState.fullName ?? startState.email?.split('@')[0] ?? 'BJJ Athlete'
+    const { error } = await supabase.from('clip_comment_replies').insert({
+      comment_id: commentId,
+      parent_reply_id: parentReplyId,
+      user_id: startState.userId,
+      author_name: authorName,
+      author_avatar_url: startState.avatarUrl,
+      content: replyDrafts[parentReplyId].trim(),
+    })
+    setSubmittingReplyId(null)
+    if (error) {
+      setFeedback(`Antwort konnte nicht gespeichert werden: ${error.message}`)
+      return
+    }
+    setReplyDrafts((current) => ({ ...current, [parentReplyId]: '' }))
+    setReplyingToReply((current) => ({ ...current, [parentReplyId]: false }))
+    await loadComments(primaryCard.id)
+  }
+
+  // Recursive component for nested replies
+  function ReplyComponent({ reply, commentId, depth = 0 }: { reply: ClipReply; commentId: string; depth?: number }) {
+    const isReplying = replyingToReply[reply.id] ?? false
+    const hasNestedReplies = reply.replies && reply.replies.length > 0
+    const isExpanded = expandedReplies[reply.id] ?? false
+    
+    return (
+      <div className={`${depth > 0 ? 'ml-8 border-l-2 border-white/5 pl-3' : ''}`}>
+        <div className="mb-3 flex gap-2">
+          {reply.avatarUrl ? (
+            <img src={reply.avatarUrl} alt={reply.author} className="h-8 w-8 rounded-full object-cover" />
+          ) : (
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-bold text-white">
+              {reply.author.slice(0, 2).toUpperCase()}
+            </div>
+          )}
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              {reply.nationality && (
+                <img 
+                  src={getFlagSvgUrl(reply.nationality ?? undefined) ?? undefined} 
+                  alt={reply.nationality} 
+                  className="h-4 w-6 rounded-[2px] object-cover"
+                />
+              )}
+              <span className="text-sm font-semibold text-white">{reply.author}</span>
+              <span className="text-xs text-white/50">{reply.meta}</span>
+            </div>
+            <p className="text-sm text-white/70">{reply.text}</p>
+            {commentFeaturesReady && (
+              <div className="mt-2 flex items-center gap-3">
+                <button 
+                  onClick={() => void submitReplyReaction(reply.id, 1)} 
+                  className={`flex items-center gap-1 text-xs ${reply.userReaction === 1 ? 'text-bjj-gold' : 'text-white/40 hover:text-white/70'}`}
+                >
+                  👍 {reply.likes}
+                </button>
+                <button 
+                  onClick={() => void submitReplyReaction(reply.id, -1)} 
+                  className={`flex items-center gap-1 text-xs ${reply.userReaction === -1 ? 'text-red-400' : 'text-white/40 hover:text-white/70'}`}
+                >
+                  👎 {reply.dislikes}
+                </button>
+                <button 
+                  onClick={() => setReplyingToReply((current) => ({ ...current, [reply.id]: !current[reply.id] }))} 
+                  className="text-xs text-white/40 hover:text-white/70"
+                >
+                  Antworten
+                </button>
+                {hasNestedReplies && (
+                  <button 
+                    onClick={() => setExpandedReplies((current) => ({ ...current, [reply.id]: !current[reply.id] }))} 
+                    className="text-xs text-white/40 hover:text-white/70"
+                  >
+                    {isExpanded ? 'Antworten ausblenden' : `Antworten (${reply.replies.length})`}
+                  </button>
+                )}
+              </div>
+            )}
+            
+            {/* Reply input for this reply */}
+            {isReplying && commentFeaturesReady && (
+              <div className="mt-3 flex gap-2">
+                <textarea 
+                  value={replyDrafts[reply.id] ?? ''} 
+                  onChange={(event) => setReplyDrafts((current) => ({ ...current, [reply.id]: event.target.value }))} 
+                  rows={1} 
+                  placeholder="Antworten..." 
+                  className="flex-1 resize-none border-b border-white/20 bg-transparent text-sm text-white outline-none placeholder:text-white/40 focus:border-bjj-gold"
+                />
+                <button 
+                  type="button" 
+                  disabled={submittingReplyId === reply.id || !(replyDrafts[reply.id] ?? '').trim()} 
+                  onClick={() => void submitNestedReply(commentId, reply.id)} 
+                  className="text-sm text-bjj-gold disabled:opacity-50"
+                >
+                  Senden
+                </button>
+              </div>
+            )}
+            
+            {/* Nested replies */}
+            {isExpanded && reply.replies?.map((nestedReply) => (
+              <ReplyComponent key={nestedReply.id} reply={nestedReply} commentId={commentId} depth={depth + 1} />
+            ))}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
@@ -825,10 +1247,33 @@ export default function StartHome() {
     )
   }
 
-  if (!primaryCard) return null
+  if (!visibleCard) {
+    return (
+      <div className="space-y-5">
+        <div className="overflow-hidden rounded-[1.4rem] border border-white/10 bg-[linear-gradient(180deg,rgba(19,25,36,0.96),rgba(12,16,24,0.95))] p-6">
+          <div className="h-[320px] rounded-[1.2rem] bg-white/[0.04] shimmer" />
+          <div className="mt-5 h-3 w-40 rounded-full bg-white/10" />
+          <div className="mt-3 h-10 w-72 rounded-2xl bg-white/10" />
+          <div className="mt-6 h-24 rounded-[1.1rem] bg-white/[0.04]" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">
+      {unlockSequence ? (
+        <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden">
+          <div className="start-home-unlock-vignette absolute inset-0" />
+          <div className="absolute inset-x-4 top-24 flex justify-center md:inset-x-8">
+            <div className="start-home-unlock-banner max-w-xl rounded-full border border-bjj-gold/20 bg-[rgba(12,16,24,0.82)] px-5 py-3 text-center backdrop-blur-xl">
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-bjj-gold/75">Neue Technik freigeschaltet</p>
+              <p className="mt-2 text-lg font-black text-white md:text-xl">{unlockSequence.nextTitle}</p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-white/60">{unlockSequence.nextLabel}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {pendingValidation ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-xl rounded-[1.6rem] border border-bjj-border bg-bjj-card p-6 shadow-card">
@@ -852,231 +1297,117 @@ export default function StartHome() {
           {validationFeedback}
         </div>
       ) : null}
-      <div className="relative overflow-hidden rounded-[2.2rem] border border-white/8 bg-[linear-gradient(180deg,#0f1419,#090d13)] shadow-[0_28px_70px_rgba(0,0,0,0.34)]">
-        <div className="pointer-events-none absolute -left-16 top-0 h-64 w-64 rounded-full bg-[#ff006e]/12 blur-[110px]" />
-        <div className="pointer-events-none absolute right-[-4rem] top-1/3 h-72 w-72 rounded-full bg-[#00f2ff]/12 blur-[120px]" />
+      {/* Clean YouTube-Style Layout */}
+      <div className="space-y-6">
+        {/* Title above Video */}
+        <header
+          className={`start-home-slide transition-all duration-500 ${transitionPhase === 'out' ? 'start-home-slide-out' : ''} ${transitionPhase === 'prepare' ? 'start-home-slide-in' : ''} ${unlockSequence ? 'start-home-unlock-focus' : ''}`}
+        >
+          <h1 className="text-xl font-bold text-white lg:text-2xl">{visibleCard.title}</h1>
+        </header>
 
-        <div className="grid gap-0 lg:grid-cols-[1.25fr_0.9fr]">
-          <section className="border-b border-white/5 lg:border-b-0 lg:border-r lg:border-white/5">
-            <div className="relative overflow-hidden bg-black">
-              <div className="relative">
-                <YoutubeEmbed title={primaryCard.clipTitle} url={primaryCard.clipUrl} />
+        <div className={`relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_240px] start-home-slide transition-all duration-500 ${transitionPhase === 'out' ? 'start-home-slide-out' : ''} ${transitionPhase === 'prepare' ? 'start-home-slide-in' : ''} ${unlockSequence ? 'start-home-unlock-focus' : ''}`}>
+          {/* Left: Video + Info */}
+          <div className="space-y-4">
+            {/* Video Player */}
+            <div
+              ref={videoShellRef}
+              className={`start-home-video-shell overflow-hidden rounded-xl bg-black transition-all duration-500 ${isShaking ? 'start-home-shake' : ''} ${isFlying ? 'opacity-60 blur-[1px]' : ''}`}
+            >
+              <YoutubeEmbed title={visibleCard.clipTitle} url={visibleCard.clipUrl} />
+            </div>
 
-                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-40 bg-gradient-to-b from-[#0f1419]/88 via-[#0f1419]/30 to-transparent" />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-44 bg-gradient-to-t from-[#0f1419] via-[#0f1419]/70 to-transparent" />
-
-                <div className="absolute left-4 right-4 top-4 z-20 flex items-start justify-between gap-4 md:left-6 md:right-6 md:top-6">
-                  <div className="max-w-[70%]">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md border border-[#00f2ff]/30 bg-[#00f2ff]/15 px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-[#00f2ff] md:text-[10px]">
-                        {primaryCard.categoryTag}
-                      </span>
-                      <span className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-slate-200 md:text-[10px]">
-                        {primaryCard.levelTag}
-                      </span>
-                    </div>
-                    <h1 className="mt-3 text-2xl font-black uppercase leading-[0.92] text-white md:text-4xl lg:text-5xl">
-                      {primaryCard.title}
-                    </h1>
-                  </div>
-
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/8 backdrop-blur-md">
-                      <MessageCircle className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/8 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/70 md:flex">
-                      <Sparkles className="h-4 w-4 text-[#ff006e]" />
-                      {comments.length} Kommentare
-                    </div>
-                  </div>
-                </div>
-
-                <div className="absolute bottom-4 left-4 right-4 z-20 md:bottom-6 md:left-6 md:right-6">
-                  <div className="flex items-end justify-between gap-4">
-                    <div className="max-w-xl">
-                      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/55 md:text-xs">Heute im Fokus</p>
-                      <p className="mt-2 text-sm font-semibold leading-relaxed text-white/85 md:text-base">
-                        {primaryCard.description}
-                      </p>
-                    </div>
-                    <div className="hidden flex-col items-end gap-2 md:flex">
-                      <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
-                        Node {primaryCard.nodeId}
-                      </div>
-                      <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">
-                        Queue Active
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-[linear-gradient(90deg,#ff006e,#00f2ff)] shadow-[0_0_18px_rgba(255,0,110,0.4)]"
-                        style={{ width: `${overallProgress}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
+            <div className="rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
+              <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/58">
+                <span>Technik Fortschritt</span>
+                <span className={progressCountFlash ? 'start-home-count-flash' : ''}>
+                  {currentTechniqueProgress.completed}/{currentTechniqueProgress.total}
+                </span>
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 px-4 py-4 md:hidden">
-              <button
-                type="button"
-                disabled={savingId === primaryCard.id}
-                onClick={() => void submitQueueResult(primaryCard, 'not_yet')}
-                className="group flex min-h-[118px] flex-col items-center justify-center rounded-[1.7rem] border border-blue-400/25 bg-[#18304d]/70 px-4 py-5 text-center shadow-[0_12px_28px_rgba(24,48,77,0.28)] transition hover:border-blue-300/45 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-400/25 bg-blue-400/10 text-blue-300">
-                  <X className="h-5 w-5" />
-                </div>
-                <p className="mt-3 text-[10px] font-black uppercase tracking-[0.26em] text-blue-300/65">Instruction Loop</p>
-                <p className="mt-1 text-lg font-black uppercase text-white">Kann ich nicht</p>
-              </button>
-
-              <button
-                type="button"
-                disabled={savingId === primaryCard.id}
-                onClick={() => void submitQueueResult(primaryCard, 'known')}
-                className="group flex min-h-[118px] flex-col items-center justify-center rounded-[1.7rem] border border-[#ccff00]/45 bg-[linear-gradient(135deg,rgba(204,255,0,0.94),rgba(173,255,47,0.8))] px-4 py-5 text-center shadow-[0_0_35px_rgba(204,255,0,0.2)] transition hover:shadow-[0_0_55px_rgba(204,255,0,0.26)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-black/10 bg-white/30 text-black">
-                  <Check className="h-5 w-5" />
-                </div>
-                <p className="mt-3 text-[10px] font-black uppercase tracking-[0.26em] text-black/55">Unlock Sequence</p>
-                <p className="mt-1 text-lg font-black uppercase text-black">Kann ich</p>
-              </button>
-            </div>
-
-            <div className="space-y-5 px-4 py-5 md:px-6 md:py-6">
-              <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
-                <div className="landing-glass-card rounded-[1.8rem] p-5 md:p-6">
-                  <p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.26em] text-[#00f2ff]">
-                    <Play className="h-4 w-4" />
-                    Technik Analyse
-                  </p>
-                  <p className="mt-4 text-sm leading-relaxed text-white/72 md:text-base">
-                    {primaryCard.principle}
-                  </p>
-                  {spotlightDetail ? (
-                    <div className="mt-5 rounded-[1.3rem] border border-white/8 bg-white/[0.03] p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">{spotlightDetail.label}</p>
-                      <p className="mt-2 text-sm font-semibold leading-relaxed text-white/88">{spotlightDetail.items[0]}</p>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="grid gap-4">
-                  <div className="landing-glass-card rounded-[1.8rem] p-5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Coach</p>
-                    <div className="mt-4 flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#ff006e,#00f2ff)] text-sm font-black text-white">
-                        {coachInitials || 'CJ'}
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-white">Craig Jones</p>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">Lead Coach</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {supportDetail ? (
-                    <div className="landing-glass-card rounded-[1.8rem] p-5">
-                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">{supportDetail.label}</p>
-                      <p className="mt-3 text-sm font-semibold leading-relaxed text-white/88">{supportDetail.items[0]}</p>
+              <div ref={progressBarRef} className={`mt-3 h-2.5 overflow-hidden rounded-full bg-white/10 ${barPulseActive ? 'start-home-bar-pulse' : ''}`}>
+                <div
+                  className="start-home-progress-fill h-full rounded-full bg-[linear-gradient(90deg,#d99f5c,#f0c27b)]"
+                  style={{ width: `${currentTechniqueProgress.percent}%` }}
+                >
+                  {isFlying ? (
+                    <div className="mr-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-white/35 bg-white/15 start-home-check-pop">
+                      <Check className="h-2.5 w-2.5 text-white" />
                     </div>
                   ) : null}
                 </div>
               </div>
             </div>
-          </section>
 
-          <section className="flex flex-col gap-5 px-4 py-5 md:px-6 md:py-6">
-            <header className="landing-glass-card rounded-[1.9rem] p-5 md:p-6">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-[#ff006e]/20 bg-[#ff006e]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-[#ff7eb5]">
-                  Start Queue
-                </span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/55">
-                  {displayName}
-                </span>
-                <span className="ml-auto rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/45">
-                  {assignedArchetype?.name ?? 'Archetyp offen'}
-                </span>
-              </div>
-
-              <h2 className="mt-5 text-3xl font-black uppercase leading-[0.95] text-white md:text-4xl">
-                Trainiere den naechsten Hebel
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-white/68 md:text-base">
-                Bewerte ehrlich, ob der Schritt schon sitzt. So bleibt dein Plan klar und dein Feed relevant.
-              </p>
-            </header>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div className="landing-glass-card rounded-[1.5rem] p-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/45">Completed</p>
-                <p className="mt-2 text-2xl font-black text-white">{completedIds.length}</p>
-              </div>
-              <div className="landing-glass-card rounded-[1.5rem] p-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/45">Validated</p>
-                <p className="mt-2 text-2xl font-black text-white">{validatedIds.length}</p>
-              </div>
-              <div className="landing-glass-card rounded-[1.5rem] p-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/45">Comments</p>
-                <p className="mt-2 text-2xl font-black text-white">{comments.length}</p>
-              </div>
-            </div>
-
-            <div className="hidden gap-3 sm:grid-cols-2 lg:grid-cols-1 md:grid">
+            {/* Mobile Buttons - Centered below video, same size */}
+            <div className="flex justify-center gap-4 lg:hidden">
               <button
                 type="button"
-                disabled={savingId === primaryCard.id}
-                onClick={() => void submitQueueResult(primaryCard, 'not_yet')}
-                className="group flex min-h-[108px] flex-col items-center justify-center rounded-[1.7rem] border border-blue-400/20 bg-[#18304d]/45 px-5 py-5 text-center transition hover:border-blue-400/40 hover:bg-[#1a3452] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+                onClick={() => handleAnimatedQueueAction('not_yet')}
+                className={`start-home-action-btn start-home-action-btn-negative flex h-28 w-40 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-400/25 bg-blue-400/10 text-blue-300">
-                  <X className="h-5 w-5" />
-                </div>
-                <p className="mt-3 text-[10px] font-black uppercase tracking-[0.26em] text-blue-300/65">Instruction Loop</p>
-                <p className="mt-1 text-lg font-black uppercase text-white">Kann ich nicht</p>
+                <X className="h-8 w-8 text-red-400" />
+                <p className="mt-2 text-base font-bold text-white">Kann ich nicht</p>
               </button>
 
               <button
                 type="button"
-                disabled={savingId === primaryCard.id}
-                onClick={() => void submitQueueResult(primaryCard, 'known')}
-                className="group flex min-h-[108px] flex-col items-center justify-center rounded-[1.7rem] border border-[#ccff00]/45 bg-[linear-gradient(135deg,rgba(204,255,0,0.92),rgba(173,255,47,0.78))] px-5 py-5 text-center shadow-[0_0_35px_rgba(204,255,0,0.18)] transition hover:shadow-[0_0_55px_rgba(204,255,0,0.24)] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+                onClick={() => handleAnimatedQueueAction('known')}
+                className={`start-home-action-btn start-home-action-btn-positive flex h-28 w-40 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-black/10 bg-white/30 text-black">
-                  <Check className="h-5 w-5" />
-                </div>
-                <p className="mt-3 text-[10px] font-black uppercase tracking-[0.26em] text-black/55">Unlock Sequence</p>
-                <p className="mt-1 text-lg font-black uppercase text-black">Kann ich</p>
+                <Check className="h-8 w-8 text-green-400" />
+                <p className="mt-2 text-base font-bold text-white">Kann ich</p>
               </button>
             </div>
 
-            <div className="landing-glass-card rounded-[1.8rem] p-5">
-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Schnellzugriff</p>
-              <div className="mt-4 flex flex-wrap gap-3">
-                <Link href={`/node/${primaryCard.nodeId}`} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-white/70 transition hover:text-white">
-                  Node Detail
+            {/* Video Info */}
+            <div className="space-y-3 pt-2">
+              {/* Links only - no tags */}
+              <div className="flex flex-wrap gap-3">
+                <Link 
+                  href={`/node/${visibleCard.nodeId}`} 
+                  className="inline-flex items-center gap-2 rounded-lg bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  Technik Details
                   <ArrowUpRight className="h-4 w-4" />
                 </Link>
-                <a href={primaryCard.clipUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-white/70 transition hover:text-white">
-                  YouTube
-                  <Share2 className="h-4 w-4" />
-                </a>
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-4 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-white/45">
-                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                  System Active
-                </div>
               </div>
             </div>
-          </section>
+          </div>
+
+          {/* Right: Clean Action Buttons (Desktop) - Centered, same size */}
+          <div className="hidden flex-col items-center justify-center gap-4 lg:flex">
+            <button
+              type="button"
+              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+              onClick={() => handleAnimatedQueueAction('not_yet')}
+              className={`start-home-action-btn start-home-action-btn-negative flex h-36 w-56 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
+            >
+              <X className="h-10 w-10 text-red-400" />
+              <p className="mt-3 text-lg font-bold text-white">Kann ich nicht</p>
+            </button>
+
+            <button
+              type="button"
+              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+              onClick={() => handleAnimatedQueueAction('known')}
+              className={`start-home-action-btn start-home-action-btn-positive flex h-36 w-56 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
+            >
+              <Check className="h-10 w-10 text-green-400" />
+              <p className="mt-3 text-lg font-bold text-white">Kann ich</p>
+            </button>
+          </div>
+
+          {isFlying && visiblePreviewImage ? (
+            <div className="start-home-flying-video fixed overflow-hidden rounded-[1.5rem]" style={flyingVideoStyle ?? undefined}>
+              <img src={visiblePreviewImage} alt={visibleCard.title} className="h-full w-full object-cover opacity-90" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
+            </div>
+          ) : null}
         </div>
       </div>
+
       {/* Legacy layout kept for rollback
       <div className="start-layout-replace">
         responseActions={
@@ -1087,95 +1418,135 @@ export default function StartHome() {
         }
         metaActions={
           <div className="flex flex-wrap items-center gap-2">
-            <a href={primaryCard.clipUrl} target="_blank" rel="noreferrer" className="inline-flex rounded-lg bg-[linear-gradient(90deg,#8f4ad0,#3c87f0)] px-4 py-2 text-xs font-black text-white">Open in YouTube</a>
-            <Link href={`/node/${primaryCard.nodeId}`} className="inline-flex rounded-lg border border-[#606983] bg-[#2c3447] px-4 py-2 text-xs font-black text-white">Node oeffnen</Link>
+            <a href={visibleCard.clipUrl} target="_blank" rel="noreferrer" className="inline-flex rounded-lg bg-[linear-gradient(90deg,#8f4ad0,#3c87f0)] px-4 py-2 text-xs font-black text-white">Open in YouTube</a>
+            <Link href={`/node/${visibleCard.nodeId}`} className="inline-flex rounded-lg border border-[#606983] bg-[#2c3447] px-4 py-2 text-xs font-black text-white">Node oeffnen</Link>
           </div>
         }
       />
       */}
-      <section className="overflow-hidden rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(20,25,34,0.98),rgba(12,16,23,0.98))] shadow-[0_20px_50px_rgba(0,0,0,0.26)]">
-        <div className="border-b border-white/10 px-5 py-5 md:px-6">
-          <div className="flex items-center justify-between gap-4">
-            <p className="text-2xl font-black uppercase text-white md:text-3xl">Kommentare <span className="text-white/35">({comments.length})</span></p>
-            <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/45 md:flex">
-              <ChevronUp className="h-4 w-4" />
-              Reel Thread
+      {/* Simple YouTube-Style Comments */}
+      <section className="mt-8 border-t border-white/10 pt-6">
+        <h3 className="text-lg font-bold text-white">{comments.length} Kommentare</h3>
+        
+        {/* Comment Input */}
+        <div className="mt-4 flex gap-3">
+          {startState?.avatarUrl ? (
+            <img src={startState.avatarUrl} alt={displayName} className="h-10 w-10 rounded-full object-cover" />
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-bjj-gold/20 text-sm font-bold text-bjj-gold">
+              {coachInitials || 'BJ'}
+            </div>
+          )}
+          <div className="flex-1">
+            <textarea 
+              value={commentDraft} 
+              onChange={(event) => setCommentDraft(event.target.value)} 
+              rows={2} 
+              placeholder="Kommentar hinzufügen..." 
+              className="w-full resize-none border-b border-white/20 bg-transparent pb-2 text-sm text-white outline-none placeholder:text-white/40 focus:border-bjj-gold"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <button 
+                type="button" 
+                onClick={() => setCommentDraft('')} 
+                className="rounded-full px-4 py-2 text-sm font-medium text-white/60 hover:text-white"
+              >
+                Abbrechen
+              </button>
+              <button 
+                type="button" 
+                disabled={submittingComment || !commentDraft.trim()} 
+                onClick={() => void submitComment()} 
+                className="rounded-full bg-bjj-gold px-4 py-2 text-sm font-bold text-bjj-coal disabled:opacity-50"
+              >
+                Kommentieren
+              </button>
             </div>
           </div>
         </div>
-        <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] px-5 py-5 md:px-6">
-          <div className="rounded-[1.8rem] border border-white/10 bg-black/15 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] md:p-5">
-            <div className="flex items-start gap-3">
-              {startState?.avatarUrl ? (
-                <img src={startState.avatarUrl} alt={displayName} className="h-11 w-11 rounded-2xl object-cover border border-white/10" />
-              ) : (
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#ff006e,#00f2ff)] text-sm font-black text-white">
-                  {coachInitials || 'BJ'}
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">In die Diskussion gehen</p>
-                <textarea value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} rows={3} placeholder="Was ist dir bei der Technik aufgefallen?" className="mt-3 w-full rounded-2xl border border-white/10 bg-[#151d2a] px-4 py-4 text-sm text-white outline-none placeholder:text-bjj-muted" />
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Feedback, Fragen oder eigene Sparring-Erfahrung</p>
-                  <button type="button" disabled={submittingComment || !commentDraft.trim()} onClick={() => void submitComment()} className="inline-flex rounded-2xl bg-[linear-gradient(135deg,#ff006e,#00f2ff)] px-5 py-3 text-xs font-black uppercase tracking-[0.16em] text-white disabled:cursor-not-allowed disabled:opacity-50">
-                    Kommentar senden
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        {comments.length > 0 ? (
-          <div className="max-h-[720px] overflow-auto bg-[radial-gradient(circle_at_top,rgba(255,0,110,0.04),transparent_28%)] px-3 py-3 md:px-4">
-            {comments.map((comment) => (
-              <div key={comment.id} className="mb-3 rounded-[1.6rem] border border-white/8 bg-white/[0.03] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] last:mb-0 md:px-5 md:py-5">
-                <div className="flex items-start gap-3">
-                  {comment.avatarUrl ? <img src={comment.avatarUrl} alt={comment.author} className="h-11 w-11 rounded-2xl object-cover border border-white/10" /> : <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#394258] text-sm font-black text-white">{comment.author.slice(0, 2).toUpperCase()}</div>}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <p className="text-lg font-black uppercase text-white">{comment.author}</p>
-                      <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">{comment.meta}</span>
-                    </div>
-                    <p className="mt-2 text-sm leading-relaxed text-[#dbe3f1] md:text-base">{comment.text}</p>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
-                      {commentFeaturesReady ? (
-                        <>
-                          <button type="button" onClick={() => void submitReaction(comment.id, 1)} className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-black uppercase tracking-[0.16em] ${comment.userReaction === 1 ? 'bg-[#20452c] text-[#8ff0b0]' : 'bg-[#1a2130] text-bjj-muted'}`}>👍 <span>{comment.likes}</span></button>
-                          <button type="button" onClick={() => void submitReaction(comment.id, -1)} className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-black uppercase tracking-[0.16em] ${comment.userReaction === -1 ? 'bg-[#482426] text-[#ff9a9a]' : 'bg-[#1a2130] text-bjj-muted'}`}>👎 <span>{comment.dislikes}</span></button>
-                        </>
-                      ) : null}
-                      <button type="button" onClick={() => setExpandedReplies((current) => ({ ...current, [comment.id]: !current[comment.id] }))} className="rounded-full bg-[#1a2130] px-3 py-2 text-xs font-black uppercase tracking-[0.16em] text-bjj-muted">
-                        {expandedReplies[comment.id] ? 'Antworten einklappen' : `Antworten${comment.replies.length ? ` (${comment.replies.length})` : ''}`}
+
+        {/* Comments List */}
+        <div className="mt-6 space-y-4">
+          {comments.length > 0 ? (
+            comments.map((comment) => (
+              <div key={comment.id} className="flex gap-3">
+                {comment.avatarUrl ? (
+                  <img src={comment.avatarUrl} alt={comment.author} className="h-10 w-10 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-sm font-bold text-white">
+                    {comment.author.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    {comment.nationality && (
+                      <img 
+                        src={getFlagSvgUrl(comment.nationality ?? undefined) ?? undefined} 
+                        alt={comment.nationality} 
+                        className="h-4 w-6 rounded-[2px] object-cover"
+                      />
+                    )}
+                    <span className="font-semibold text-white">{comment.author}</span>
+                    <span className="text-xs text-white/50">{comment.meta}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-white/80">{comment.text}</p>
+                  {commentFeaturesReady && (
+                    <div className="mt-2 flex items-center gap-4">
+                      <button 
+                        onClick={() => void submitReaction(comment.id, 1)} 
+                        className={`flex items-center gap-1 text-xs ${comment.userReaction === 1 ? 'text-bjj-gold' : 'text-white/50 hover:text-white'}`}
+                      >
+                        👍 {comment.likes}
+                      </button>
+                      <button 
+                        onClick={() => void submitReaction(comment.id, -1)} 
+                        className={`flex items-center gap-1 text-xs ${comment.userReaction === -1 ? 'text-red-400' : 'text-white/50 hover:text-white'}`}
+                      >
+                        👎 {comment.dislikes}
+                      </button>
+                      <button 
+                        onClick={() => setExpandedReplies((current) => ({ ...current, [comment.id]: !current[comment.id] }))} 
+                        className="text-xs text-white/50 hover:text-white"
+                      >
+                        {expandedReplies[comment.id] ? 'Antworten ausblenden' : `Antworten ${comment.replies.length > 0 ? `(${comment.replies.length})` : ''}`}
                       </button>
                     </div>
-                    <div className="mt-4 border-l border-white/10 pl-4 md:pl-5">
-                      {expandedReplies[comment.id] && comment.replies.length > 0 ? (
-                        <div className="space-y-3">
-                          {comment.replies.map((reply) => (
-                            <div key={reply.id} className="flex items-start gap-3 rounded-2xl bg-black/10 px-3 py-3">
-                              {reply.avatarUrl ? <img src={reply.avatarUrl} alt={reply.author} className="h-9 w-9 rounded-2xl object-cover" /> : <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#394258] text-xs font-black text-white">{reply.author.slice(0, 2).toUpperCase()}</div>}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-3"><p className="text-sm font-black uppercase text-white">{reply.author}</p><span className="text-[10px] uppercase tracking-[0.16em] text-bjj-muted">{reply.meta}</span></div>
-                                <p className="mt-1 text-sm leading-relaxed text-[#dbe3f1]">{reply.text}</p>
-                              </div>
-                            </div>
-                          ))}
+                  )}
+                  
+                  {/* Replies */}
+                  {expandedReplies[comment.id] && (
+                    <div className="mt-3 pl-4 border-l-2 border-white/10">
+                      {comment.replies.map((reply) => (
+                        <ReplyComponent key={reply.id} reply={reply} commentId={comment.id} />
+                      ))}
+                      {commentFeaturesReady && (
+                        <div className="flex gap-2">
+                          <textarea 
+                            value={replyDrafts[comment.id] ?? ''} 
+                            onChange={(event) => setReplyDrafts((current) => ({ ...current, [comment.id]: event.target.value }))} 
+                            rows={1} 
+                            placeholder="Antworten..." 
+                            className="flex-1 resize-none border-b border-white/20 bg-transparent text-sm text-white outline-none placeholder:text-white/40 focus:border-bjj-gold"
+                          />
+                          <button 
+                            type="button" 
+                            disabled={submittingReplyId === comment.id || !(replyDrafts[comment.id] ?? '').trim()} 
+                            onClick={() => void submitReply(comment.id)} 
+                            className="text-sm text-bjj-gold disabled:opacity-50"
+                          >
+                            Senden
+                          </button>
                         </div>
-                      ) : null}
-                      {commentFeaturesReady ? (
-                        <div className="mt-3 space-y-2">
-                            <textarea value={replyDrafts[comment.id] ?? ''} onChange={(event) => setReplyDrafts((current) => ({ ...current, [comment.id]: event.target.value }))} rows={2} placeholder="Antworten..." className="w-full rounded-2xl border border-white/10 bg-[#151d2a] px-4 py-3 text-sm text-white outline-none placeholder:text-bjj-muted" />
-                            <button type="button" disabled={submittingReplyId === comment.id || !(replyDrafts[comment.id] ?? '').trim()} onClick={() => void submitReply(comment.id)} className="inline-flex rounded-xl bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white disabled:cursor-not-allowed disabled:opacity-50">Antworten</button>
-                          </div>
-                        ) : null}
-                      </div>
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
-          ) : <div className="px-5 py-8 text-sm text-bjj-muted md:px-6">Noch keine Kommentare. Sei der Erste, der etwas zum Node schreibt.</div>}
+            ))
+          ) : (
+            <p className="text-sm text-white/50">Noch keine Kommentare. Sei der Erste!</p>
+          )}
+        </div>
       </section>
       {feedback ? <div className="rounded-[1.6rem] border border-bjj-gold/20 bg-bjj-gold/10 px-5 py-4 text-sm text-bjj-text">{feedback}</div> : null}
     </div>

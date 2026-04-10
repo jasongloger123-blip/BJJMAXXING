@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 type CommentPayload =
   | { type: 'comment'; clipKey?: string; nodeId?: string; content?: string }
   | { type: 'reaction'; commentId?: string; value?: 1 | -1 }
-  | { type: 'reply'; commentId?: string; content?: string }
+  | { type: 'reply'; commentId?: string; parentReplyId?: string | null; content?: string }
 
 export async function POST(request: Request) {
   const supabase = createClient()
@@ -87,6 +87,7 @@ export async function POST(request: Request) {
       .from('clip_comment_replies')
       .insert({
         comment_id: body.commentId,
+        parent_reply_id: body.parentReplyId ?? null,
         user_id: user.id,
         author_name: authorName,
         author_avatar_url: avatarUrl,

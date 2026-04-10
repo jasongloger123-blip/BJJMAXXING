@@ -1,10 +1,13 @@
 import type { LucideIcon } from 'lucide-react'
+import type { TechniqueStyleCoverage } from '@/lib/technique-style'
 
-export type TechniqueStage = 'setup' | 'position' | 'transition' | 'finish'
+export type TechniqueStage = 'position' | 'pass' | 'submission'
 
 export type TechniqueItem = {
   id: string
+  techniqueId?: string
   title: string
+  description: string
   tag: string
   tagColor: string
   level: number
@@ -12,11 +15,15 @@ export type TechniqueItem = {
   prereq: string
   icon: LucideIcon
   image: string
+  coachAvatar: string
   locked?: boolean
+  unlockState?: 'unlocked' | 'locked'
   fighter: string
   creator: string
   stage: TechniqueStage
-  nodeId?: string
+  difficulty: string
+  style: string
+  styleCoverage: TechniqueStyleCoverage
 }
 
 export type CreatorPlan = {
@@ -31,13 +38,12 @@ export type CreatorPlan = {
 }
 
 export type TechniqueSort = 'featured' | 'level-desc' | 'level-asc' | 'title-asc'
-export type TechniqueAvailability = 'all' | 'available' | 'locked'
-
 export type TechniqueFilters = {
   query: string
-  stage: 'all' | TechniqueStage
-  fighter: string
-  availability: TechniqueAvailability
+  stages: TechniqueStage[]
+  difficulties: string[]
+  styles: string[]
+  fighters: string[]
   sort: TechniqueSort
 }
 
@@ -45,6 +51,12 @@ export type TechniqueFilterOption = {
   id: 'all' | TechniqueStage
   label: string
   count: number
+}
+
+export type TechniqueFilterGroupOption<T extends string> = {
+  id: T
+  label: string
+  count?: number
 }
 
 export type ActiveTechniqueFilter = {

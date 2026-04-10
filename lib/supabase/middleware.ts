@@ -39,7 +39,7 @@ export async function updateSession(request: NextRequest) {
 
   // Redirect unauthenticated users trying to access protected routes
   const { pathname } = request.nextUrl
-  const protectedPaths = ['/onboarding', '/skill-tree', '/node', '/profile', '/gameplan', '/erweitern', '/notifications']
+  const protectedPaths = ['/onboarding', '/skill-tree', '/node', '/profile', '/gameplan', '/erweitern', '/notifications', '/gyms']
   const isProtected = protectedPaths.some(p => pathname.startsWith(p))
 
   if (!user && isProtected) {

@@ -109,8 +109,7 @@ export const ARCHETYPES: Archetype[] = [
 export const QUESTIONS: Question[] = [
   {
     id: 'build',
-    question: 'Wie ist dein Build?',
-    helper: 'Welche Koerperform passt am ehesten zu dir?',
+    question: 'Welche Koerperform passt am besten zu dir?',
     options: [
       {
         label: 'Lang & schlank',

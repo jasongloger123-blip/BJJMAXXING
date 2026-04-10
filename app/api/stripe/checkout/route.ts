@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import Stripe from 'stripe'
-import { STRIPE_PRODUCTS, getStripeServerClient } from '@/lib/stripe'
+import { STRIPE_PRODUCTS, getStripeServerClient, hasValidStripePrice } from '@/lib/stripe'
 import { createClient } from '@/lib/supabase/server'
 
 export async function POST(request: Request) {
@@ -31,9 +31,9 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser()
     const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin
 
-    if (!priceId) {
+    if (!priceId || !hasValidStripePrice(productKey)) {
       return NextResponse.json(
-        { error: `Die Environment Variable ${product.priceEnvKey} fehlt noch.` },
+        { error: `Stripe ist noch nicht live. Hinterlege eine echte Price-ID in ${product.priceEnvKey}.` },
         { status: 400 }
       )
     }

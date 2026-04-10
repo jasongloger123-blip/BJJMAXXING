@@ -11,9 +11,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Circle,
-  CirclePlay,
-  Clock3,
   ExternalLink,
   Info,
   Lock,
@@ -24,19 +21,25 @@ import {
   Target,
   Unlock,
 } from 'lucide-react'
+import { GameplanClipDeck } from '@/components/gameplan/GameplanClipDeck'
+import { clipArchiveToCuratedClip, type ClipArchiveRecord } from '@/lib/clip-archive'
+import type { ResolvedGameplan } from '@/lib/gameplans'
 import { getNodeById, LONG_FLEXIBLE_GUARD_NODES } from '@/lib/nodes'
 import { createClient } from '@/lib/supabase/client'
 import { waitForAuthenticatedUser } from '@/lib/supabase/auth-guard'
+import { getExternalSourceRoleLabel, type ExternalSourceRole, type NodeExternalSourceWithSource } from '@/lib/external-technique-sources'
+import { getTechniqueFollowUpsFromPlan } from '@/lib/technique-catalog'
 
 type ProgressState = Record<string, boolean>
-type TechniqueTab = 'details' | 'errors' | 'counter' | 'videos' | 'drills'
+type TechniqueTab = 'videos' | 'counter' | 'drills' | 'followups'
+type ExternalSourceGroups = Record<ExternalSourceRole, NodeExternalSourceWithSource[]>
+type ArchivedClipGroups = Record<ExternalSourceRole, ClipArchiveRecord[]>
 
 const TAB_CONFIG: { id: TechniqueTab; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { id: 'details', label: 'Details', icon: Info },
-  { id: 'errors', label: 'Fehler', icon: AlertTriangle },
+  { id: 'videos', label: 'Details', icon: Play },
   { id: 'counter', label: 'Counter', icon: Shield },
-  { id: 'videos', label: 'Alle Videos', icon: CirclePlay },
   { id: 'drills', label: 'Drills', icon: Target },
+  { id: 'followups', label: 'Follow-Ups', icon: ChevronRight },
 ]
 
 function extractYoutubeId(url?: string | null) {
@@ -55,6 +58,21 @@ function getYoutubeThumbnail(url?: string | null) {
   const youtubeId = extractYoutubeId(url)
   if (!youtubeId) return null
   return `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+}
+
+function buildYoutubeEmbedUrl(url?: string | null) {
+  const youtubeId = extractYoutubeId(url)
+  if (!youtubeId) return null
+
+  const params = new URLSearchParams({
+    autoplay: '1',
+    mute: '1',
+    rel: '0',
+    playsinline: '1',
+    modestbranding: '1',
+  })
+
+  return `https://www.youtube.com/embed/${youtubeId}?${params.toString()}`
 }
 
 function getNodeThumbnail(node: { videos: { url: string }[] }) {
@@ -78,17 +96,8 @@ function getDifficultyLabel(level: number) {
 
 function getTrackBadgeLabel(track: 'foundation' | 'secondary' | 'top-game') {
   if (track === 'foundation') return 'Position'
-  if (track === 'secondary') return 'Transition'
-  return 'System'
-}
-
-function getVideoLabel(count: number) {
-  return `${count} Video${count === 1 ? '' : 's'}`
-}
-
-function formatChecklistStatus(progress: ProgressState, ruleIds: string[]) {
-  const checked = ruleIds.filter((ruleId) => progress[ruleId]).length
-  return `${checked}/${ruleIds.length}`
+  if (track === 'secondary') return 'Pass'
+  return 'Submission'
 }
 
 function extractDomainLabel(url: string) {
@@ -97,15 +106,45 @@ function extractDomainLabel(url: string) {
   return 'Extern'
 }
 
+function createEmptyExternalSourceGroups(): ExternalSourceGroups {
+  return {
+    main_reference: [],
+    counter_reference: [],
+    drill_reference: [],
+    related_reference: [],
+  }
+}
+
+function createEmptyClipGroups(): ArchivedClipGroups {
+  return {
+    main_reference: [],
+    counter_reference: [],
+    drill_reference: [],
+    related_reference: [],
+  }
+}
+
+function dedupeClips(clips: ClipArchiveRecord[]) {
+  const seen = new Set<string>()
+  return clips.filter((clip) => {
+    if (seen.has(clip.id)) return false
+    seen.add(clip.id)
+    return true
+  })
+}
+
 export default function NodeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const supabase = createClient()
   const node = getNodeById(id)
-  const [activeTab, setActiveTab] = useState<TechniqueTab>('details')
+  const [activeTab, setActiveTab] = useState<TechniqueTab>('videos')
   const [progress, setProgress] = useState<ProgressState>({})
   const [completed, setCompleted] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [externalSources, setExternalSources] = useState<ExternalSourceGroups>(createEmptyExternalSourceGroups)
+  const [archivedClips, setArchivedClips] = useState<ArchivedClipGroups>(createEmptyClipGroups)
+  const [activePlan, setActivePlan] = useState<ResolvedGameplan | null>(null)
 
   const initialProgress = useMemo(
     () =>
@@ -128,6 +167,11 @@ export default function NodeDetailPage() {
       .slice(0, 3)
   }, [node])
 
+  const followUps = useMemo(() => {
+    if (!activePlan || !node) return []
+    return getTechniqueFollowUpsFromPlan(node.id, activePlan)
+  }, [activePlan, node])
+
   const unlockedNodes = useMemo(() => {
     if (!node) return []
     return LONG_FLEXIBLE_GUARD_NODES.filter((candidate) => candidate.prerequisites.includes(node.id)).slice(0, 3)
@@ -138,15 +182,12 @@ export default function NodeDetailPage() {
     return node.completionRules.every((rule) => progress[rule.id])
   }, [node, progress])
 
-  const watchedCount = useMemo(() => {
+  const completedRuleCount = useMemo(() => {
     if (!node) return 0
-    const checkedCount = Object.values(progress).filter(Boolean).length
-    return Math.min(node.videos.length, checkedCount)
+    return Object.values(progress).filter(Boolean).length
   }, [node, progress])
 
   const difficulty = node ? getDifficulty(node.level) : 1
-  const mainVideo = node?.videos[0] ?? null
-  const mainThumbnail = getNodeThumbnail(node ?? { videos: [] })
 
   const loadProgress = useCallback(async () => {
     if (!node) return
@@ -183,10 +224,81 @@ export default function NodeDetailPage() {
     void loadProgress()
   }, [loadProgress])
 
+  useEffect(() => {
+    let active = true
+
+    async function loadActivePlan() {
+      try {
+        const response = await fetch('/api/gameplan/active', { cache: 'no-store' })
+        const payload = (await response.json()) as { plan?: ResolvedGameplan }
+        if (!active || !response.ok || !payload.plan) return
+        setActivePlan(payload.plan)
+      } catch {
+        if (!active) return
+        setActivePlan(null)
+      }
+    }
+
+    void loadActivePlan()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!node) return
+
+    let active = true
+    const nodeId = node.id
+
+    async function loadExternalSources() {
+      try {
+        const response = await fetch(`/api/node-external-sources?nodeId=${encodeURIComponent(nodeId)}`, { cache: 'no-store' })
+        const payload = (await response.json()) as { groups?: ExternalSourceGroups }
+
+        if (!active || !response.ok || !payload.groups) return
+        setExternalSources(payload.groups)
+      } catch {
+        if (!active) return
+        setExternalSources(createEmptyExternalSourceGroups())
+      }
+    }
+
+    void loadExternalSources()
+
+    return () => {
+      active = false
+    }
+  }, [node])
+
+  useEffect(() => {
+    if (!node) return
+
+    let active = true
+    const nodeId = node.id
+    async function loadArchivedClips() {
+      try {
+        const response = await fetch(`/api/node-clips?nodeId=${encodeURIComponent(nodeId)}`, { cache: 'no-store' })
+        const payload = (await response.json()) as { groups?: ArchivedClipGroups }
+        if (!active || !response.ok || !payload.groups) return
+        setArchivedClips(payload.groups)
+      } catch {
+        if (!active) return
+        setArchivedClips(createEmptyClipGroups())
+      }
+    }
+
+    void loadArchivedClips()
+    return () => {
+      active = false
+    }
+  }, [node])
+
   if (!node) {
     return (
       <div className="rounded-3xl border border-bjj-border bg-bjj-card p-8">
-        <p className="text-bjj-muted">Dieser Node wurde nicht gefunden.</p>
+        <p className="text-bjj-muted">Diese Technik wurde nicht gefunden.</p>
         <Link href="/gameplan" className="mt-4 inline-block text-sm font-semibold text-bjj-gold">
           Zurueck zum Gameplan
         </Link>
@@ -194,7 +306,163 @@ export default function NodeDetailPage() {
     )
   }
 
+  const unlockedSourceIds = new Set(activePlan?.unlockSummary.unlockedSourceNodeIds ?? [])
+  const lockedSourceIds = new Set(activePlan?.unlockSummary.lockedSourceNodeIds ?? [])
+  const isExplicitlyUnlocked = unlockedSourceIds.has(node.id)
+  const isExplicitlyLocked = lockedSourceIds.has(node.id)
+  const isOutsideCurrentPlan = Boolean(activePlan) && !isExplicitlyUnlocked && !isExplicitlyLocked
+
+  if (isExplicitlyLocked || isOutsideCurrentPlan) {
+    const currentPlanNode = activePlan?.unlockSummary.currentNodeId ? activePlan.nodes[activePlan.unlockSummary.currentNodeId] : null
+
+    return (
+      <div className="rounded-[1.8rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-8 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+        <p className="text-[11px] font-black uppercase tracking-[0.24em] text-bjj-gold">Locked Technik</p>
+        <h1 className="mt-3 text-3xl font-black text-white">{node.title}</h1>
+        <p className="mt-4 max-w-2xl text-sm leading-8 text-white/72">
+          {isOutsideCurrentPlan
+            ? 'Diese Technik gehoert aktuell nicht zu deinem freigeschalteten Pfad. Sie wird erst sichtbar, wenn dein Gameplan an dieser Stelle angekommen ist.'
+            : currentPlanNode
+              ? `Diese Technik bleibt noch gesperrt. Arbeite zuerst an ${currentPlanNode.title}, dann geht der naechste Abschnitt in deinem Gameplan auf.`
+              : 'Diese Technik bleibt noch gesperrt, bis dein naechster Gameplan-Schritt freigeschaltet wurde.'}
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href="/gameplan" className="inline-flex items-center gap-2 rounded-2xl bg-bjj-gold px-5 py-3 text-sm font-black text-bjj-coal">
+            Zurueck zum Gameplan
+          </Link>
+          <Link href="/technique-library" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-white/72">
+            Zur Bibliothek
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   const currentNode = node
+  const detailObjectives =
+    (currentNode.successDefinition.length > 0 ? currentNode.successDefinition : [currentNode.subtitle]).slice(0, 3)
+  const counterItems = [
+    'Typischer gegnerischer Counter',
+    'Deine direkte Antwort',
+    'Fruehes Warnsignal',
+  ]
+  const assignedSidebarClips = dedupeClips([
+    ...archivedClips.main_reference,
+    ...archivedClips.counter_reference,
+    ...archivedClips.drill_reference,
+  ])
+  const sidebarVideos =
+    assignedSidebarClips.length > 0
+      ? assignedSidebarClips.map((clip) => ({
+          id: clip.id,
+          title: clip.title,
+          url: clip.video_url ?? clip.source_url,
+          creator: clip.video_platform ?? 'OutlierDB',
+          detailHref: `/clips/${clip.id}`,
+        }))
+      : currentNode.videos
+  const watchedCount = Math.min(sidebarVideos.length, completedRuleCount)
+  const detailSourceCards = externalSources.main_reference
+  const counterSourceCards = externalSources.counter_reference
+  const drillSourceCards = externalSources.drill_reference
+  const detailClipDeck = archivedClips.main_reference.map((clip) =>
+    clipArchiveToCuratedClip(clip, { nodeId: currentNode.id, category: currentNode.title, levelLabel: 'Archiv' })
+  )
+  const counterClipDeck = archivedClips.counter_reference.map((clip) =>
+    clipArchiveToCuratedClip(clip, { nodeId: currentNode.id, category: 'Counter', levelLabel: 'Archiv' })
+  )
+  const drillClipDeck = archivedClips.drill_reference.map((clip) =>
+    clipArchiveToCuratedClip(clip, { nodeId: currentNode.id, category: 'Drill', levelLabel: 'Archiv' })
+  )
+  const heroVideoUrl = archivedClips.main_reference[0]?.video_url ?? archivedClips.main_reference[0]?.source_url ?? currentNode.videos[0]?.url ?? null
+  const heroVideoTitle = archivedClips.main_reference[0]?.title ?? currentNode.videos[0]?.title ?? currentNode.title
+  const heroVideoCreator = archivedClips.main_reference[0]?.video_platform ?? currentNode.videos[0]?.creator ?? extractDomainLabel(heroVideoUrl ?? '')
+  const heroEmbedUrl = buildYoutubeEmbedUrl(heroVideoUrl)
+  const mainThumbnail = getYoutubeThumbnail(heroVideoUrl) ?? getNodeThumbnail(currentNode)
+  const primaryVideos =
+    detailClipDeck.length > 0
+      ? detailClipDeck.map((clip) => ({
+          id: clip.id,
+          title: clip.title,
+          url: clip.sourceUrl,
+          creator: clip.levelLabel,
+          detailHref: clip.detailHref ?? `/node/${currentNode.id}`,
+        }))
+      : currentNode.videos.map((video, index) => ({
+          id: `${currentNode.id}-video-${index}`,
+          title: video.title,
+          url: video.url,
+          creator: video.creator,
+        }))
+
+  function renderExternalSourceCards(sources: NodeExternalSourceWithSource[], emptyLabel: string) {
+    if (sources.length === 0) {
+      return (
+        <div className="rounded-[1.7rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.92),rgba(12,16,24,0.9))] p-8 text-sm leading-8 text-white/55">
+          {emptyLabel}
+        </div>
+      )
+    }
+
+    return sources.map((entry) => {
+      const source = entry.source
+      const sourceLabel = source.video_url ? extractDomainLabel(source.video_url) : source.provider
+      const thumbnail = getYoutubeThumbnail(source.video_url ?? undefined)
+
+      return (
+        <a
+          key={entry.mappingId}
+          href={source.source_url}
+          target="_blank"
+          rel="noreferrer"
+          className="group grid gap-5 rounded-[1.7rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.96),rgba(12,16,24,0.93))] p-5 shadow-[0_18px_44px_rgba(0,0,0,0.22)] transition hover:border-white/[0.08] hover:brightness-105 md:grid-cols-[220px_minmax(0,1fr)]"
+        >
+          <div className="relative aspect-video overflow-hidden rounded-[1.2rem] bg-[#12151b]">
+            {thumbnail ? (
+              <img
+                src={thumbnail}
+                alt={source.title}
+                className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+              />
+            ) : (
+              <div className="h-full w-full bg-[linear-gradient(180deg,#1b1e25,#0f1217)]" />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+            <div className="absolute left-3 top-3 rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/75">
+              {getExternalSourceRoleLabel(entry.role)}
+            </div>
+          </div>
+
+          <div className="flex min-w-0 flex-col justify-center">
+            <div className="flex flex-wrap items-center gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/38">
+              <span>{sourceLabel}</span>
+              {source.timestamp_label ? <span>{source.timestamp_label}</span> : null}
+              {source.search_query ? <span>{source.search_query}</span> : null}
+            </div>
+            <p className="mt-3 text-xl font-black text-white">{source.title}</p>
+            {source.summary ? <p className="mt-3 text-sm leading-8 text-white/66">{source.summary}</p> : null}
+            {entry.notes ? <p className="mt-3 text-sm leading-8 text-[#f0ab3c]">{entry.notes}</p> : null}
+            {source.hashtags.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {source.hashtags.slice(0, 8).map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/54"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-bjj-gold">
+              Quelle oeffnen
+              <ArrowUpRight className="h-4 w-4" />
+            </span>
+          </div>
+        </a>
+      )
+    })
+  }
 
   async function persistProgress(nextProgress: ProgressState, markComplete: boolean) {
     setSaving(true)
@@ -219,20 +487,6 @@ export default function NodeDetailPage() {
     setSaving(false)
   }
 
-  async function toggleRule(ruleId: string) {
-    const nextProgress = {
-      ...progress,
-      [ruleId]: !progress[ruleId],
-    }
-
-    setProgress(nextProgress)
-
-    const nextCompleted =
-      currentNode.completionRules.length === 0 || currentNode.completionRules.every((rule) => nextProgress[rule.id])
-    setCompleted(nextCompleted)
-    await persistProgress(nextProgress, nextCompleted)
-  }
-
   async function markComplete() {
     if (!allChecked) return
     await persistProgress(progress, true)
@@ -244,7 +498,7 @@ export default function NodeDetailPage() {
     <div className="mx-auto max-w-[1400px] pb-32">
       <div className="mb-6 flex items-center gap-3 px-1 text-[11px] font-bold uppercase tracking-[0.28em] text-white/30">
         <Link href="/technique-library" className="transition-colors hover:text-bjj-gold">
-          Library
+          Technik
         </Link>
         <ChevronRight className="h-3.5 w-3.5 text-white/22" />
         <span className="text-white/82">{currentNode.title}</span>
@@ -252,12 +506,21 @@ export default function NodeDetailPage() {
 
       <section className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.2fr)_380px] xl:grid-cols-[minmax(0,1.28fr)_420px]">
         <div className="space-y-9">
-          <div className="overflow-hidden rounded-[2.2rem] border border-white/8 bg-[#090a0d] shadow-[0_30px_90px_rgba(0,0,0,0.42)]">
+          <div className="overflow-hidden rounded-[2.2rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(11,14,21,0.98),rgba(8,10,16,0.98))] shadow-[0_30px_90px_rgba(0,0,0,0.42)]">
             <div className="relative aspect-[9/16] overflow-hidden bg-black sm:aspect-[4/5] lg:aspect-video">
-              {mainThumbnail ? (
+              {heroEmbedUrl ? (
+                <iframe
+                  src={heroEmbedUrl}
+                  title={heroVideoTitle}
+                  className="h-full w-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+              ) : mainThumbnail ? (
                 <img
                   src={mainThumbnail}
-                  alt={mainVideo?.title ?? currentNode.title}
+                  alt={heroVideoTitle}
                   className="h-full w-full object-cover brightness-[0.72] contrast-[1.05]"
                 />
               ) : (
@@ -266,9 +529,9 @@ export default function NodeDetailPage() {
 
               <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.14),rgba(0,0,0,0.18)_35%,rgba(0,0,0,0.88)_100%)]" />
 
-              {mainVideo?.url ? (
+              {heroVideoUrl && !heroEmbedUrl ? (
                 <a
-                  href={mainVideo.url}
+                  href={heroVideoUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="absolute inset-0 flex items-center justify-center"
@@ -282,25 +545,29 @@ export default function NodeDetailPage() {
 
               <div className="absolute left-4 right-4 top-4 z-20 flex items-start justify-between gap-4 md:left-6 md:right-6 md:top-6">
                 <div className="max-w-[70%]">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md border border-[#00f2ff]/30 bg-[#00f2ff]/15 px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-[#00f2ff] md:text-[10px]">
-                      {getTrackBadgeLabel(currentNode.track)}
-                    </span>
-                    <span className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-slate-200 md:text-[10px]">
-                      {getDifficultyLabel(currentNode.level)}
-                    </span>
-                  </div>
-                  <h1 className="mt-3 font-display text-3xl font-black leading-[0.92] tracking-[-0.05em] text-white md:text-5xl">
+                  <h1 className="font-display text-3xl font-black leading-[0.92] tracking-[-0.05em] text-white md:text-5xl">
                     {currentNode.title}
                   </h1>
                 </div>
 
                 <div className="flex flex-col gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/8 backdrop-blur-md text-white">
-                    <ExternalLink className="h-5 w-5" />
-                  </div>
-                  <div className="hidden rounded-2xl border border-white/10 bg-white/8 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/70 md:block">
-                    {extractDomainLabel(mainVideo?.url ?? '')}
+                  {heroVideoUrl ? (
+                    <a
+                      href={heroVideoUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.06] backdrop-blur-md text-white transition hover:bg-white/[0.1]"
+                      aria-label="Originalvideo oeffnen"
+                    >
+                      <ExternalLink className="h-5 w-5" />
+                    </a>
+                  ) : (
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.06] backdrop-blur-md text-white">
+                      <ExternalLink className="h-5 w-5" />
+                    </div>
+                  )}
+                  <div className="hidden rounded-2xl border border-white/[0.08] bg-white/[0.06] px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/70 md:block">
+                    {heroVideoCreator}
                   </div>
                 </div>
               </div>
@@ -316,17 +583,14 @@ export default function NodeDetailPage() {
                       <div
                         className="h-full bg-[linear-gradient(90deg,#ff006e,#00f2ff)] shadow-[0_0_18px_rgba(255,0,110,0.5)]"
                         style={{
-                          width: `${currentNode.videos.length > 0 ? (watchedCount / currentNode.videos.length) * 100 : 0}%`,
+                          width: `${sidebarVideos.length > 0 ? (watchedCount / sidebarVideos.length) * 100 : 0}%`,
                         }}
                       />
                     </div>
                   </div>
                   <div className="hidden flex-col items-end gap-2 md:flex">
-                    <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
+                    <div className="rounded-2xl border border-white/[0.08] bg-black/30 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-white/70">
                       Ref {currentNode.id.toUpperCase()}
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-white/45">
-                      {getVideoLabel(currentNode.videos.length)}
                     </div>
                   </div>
                 </div>
@@ -336,27 +600,15 @@ export default function NodeDetailPage() {
 
           <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
             <div>
-              <span className="inline-flex rounded-md border border-white/10 bg-white/7 px-3 py-1 text-[11px] font-black uppercase tracking-[0.2em] text-white/55">
-                {getTrackBadgeLabel(currentNode.track)}
-              </span>
-              <h2 className="font-display mt-4 text-[2.4rem] font-black leading-[0.9] tracking-[-0.06em] text-white md:text-[3.3rem]">
+              <h2 className="font-display text-[2.4rem] font-black leading-[0.9] tracking-[-0.06em] text-white md:text-[3.3rem]">
                 {currentNode.title}
               </h2>
-              <div className="mt-5 flex flex-wrap items-center gap-5 text-[14px] text-white/38">
-                <span className="inline-flex items-center gap-2">
-                  <CirclePlay className="h-4 w-4" />
-                  {getVideoLabel(currentNode.videos.length)}
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <Clock3 className="h-4 w-4" />
-                  {currentNode.level * 8}min Gesamt
-                </span>
-              </div>
+              <p className="mt-2 text-sm text-white/60">{getTrackBadgeLabel(currentNode.track)} • {getDifficultyLabel(currentNode.level)}</p>
             </div>
 
-            <div className="inline-flex items-center gap-3 self-start rounded-[1.3rem] border border-white/8 bg-white/[0.03] px-4 py-3">
+            <div className="inline-flex items-center gap-3 self-start rounded-[1.3rem] border border-white/[0.06] bg-[linear-gradient(180deg,rgba(18,23,33,0.9),rgba(12,16,24,0.88))] px-4 py-3 shadow-[0_14px_30px_rgba(0,0,0,0.18)]">
               <div className="flex items-center gap-1">
-                {Array.from({ length: Math.max(currentNode.videos.length, 3) }).map((_, index) => (
+                {Array.from({ length: Math.max(sidebarVideos.length, 3) }).map((_, index) => (
                   <span
                     key={index}
                     className={`h-2.5 w-2.5 rounded-full ${index < watchedCount ? 'bg-bjj-gold' : 'bg-white/18'}`}
@@ -364,7 +616,7 @@ export default function NodeDetailPage() {
                 ))}
               </div>
               <span className="text-[11px] font-black uppercase tracking-[0.22em] text-white/78">
-                Watched {watchedCount}/{currentNode.videos.length}
+                Watched {watchedCount}/{sidebarVideos.length}
               </span>
             </div>
           </div>
@@ -390,209 +642,280 @@ export default function NodeDetailPage() {
             </nav>
           </div>
 
-          {activeTab === 'details' ? (
+          {activeTab === 'videos' ? (
             <div className="space-y-8">
-              <p className="max-w-4xl text-[1.08rem] leading-[1.95] text-white/70">{currentNode.description}</p>
+              <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#7dd3fc]">Details</p>
+                    <p className="mt-2 text-sm text-white/62">
+                      Alle Detail-Videos dieser Technik liegen hier gebuendelt und die moeglichen Follow-Ups findest du direkt darunter.
+                    </p>
+                  </div>
+                  <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/48">
+                    {heroVideoCreator || 'Video'}
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {primaryVideos.map((video, index) => {
+                    const thumbnail = getYoutubeThumbnail(video.url)
+                    const content = (
+                      <>
+                        <div className="relative aspect-video overflow-hidden rounded-[1.05rem] bg-[#141922]">
+                          {thumbnail ? (
+                            <img
+                              src={thumbnail}
+                              alt={video.title}
+                              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.04]"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center">
+                              <Play className="h-5 w-5 text-white/32" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" />
+                        </div>
+                        <div className="mt-3 min-w-0">
+                          <p className="truncate text-sm font-bold text-white">{video.title}</p>
+                          <p className="mt-1 text-xs text-white/40">{video.creator}</p>
+                        </div>
+                      </>
+                    )
+
+                    if ('detailHref' in video && typeof video.detailHref === 'string') {
+                      return (
+                        <Link
+                          key={`${video.id}-${index}`}
+                          href={video.detailHref}
+                          className="group rounded-[1.3rem] border border-white/[0.05] bg-[#101319] p-3 transition hover:border-white/[0.08]"
+                        >
+                          {content}
+                        </Link>
+                      )
+                    }
+
+                    return (
+                      <a
+                        key={`${video.id}-${index}`}
+                        href={video.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group rounded-[1.3rem] border border-white/[0.05] bg-[#101319] p-3 transition hover:border-white/[0.08]"
+                      >
+                        {content}
+                      </a>
+                    )
+                  })}
+                </div>
+              </div>
 
               <div className="grid gap-5 md:grid-cols-2">
-                <div className="rounded-[1.8rem] border border-white/5 bg-white/[0.025] p-7">
+                <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+                  <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.22em] text-bjj-gold">
+                    <Info className="h-4 w-4" />
+                    Kurzbeschreibung
+                  </p>
+                  <div className="mt-5 rounded-[1.2rem] border border-white/[0.05] bg-[#101319] p-5">
+                    <p className="text-sm leading-8 text-white/72">{currentNode.description}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
                   <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.22em] text-bjj-gold">
                     <Target className="h-4 w-4" />
                     Key Objectives
                   </p>
                   <div className="mt-5 space-y-3">
-                    {(currentNode.successDefinition.length > 0 ? currentNode.successDefinition : [currentNode.subtitle]).map((item) => (
-                      <div key={item} className="rounded-[1.2rem] border border-white/7 bg-[#101319] px-4 py-4 text-sm text-white/76">
-                        {item}
+                    {detailObjectives.map((item, index) => (
+                      <div key={item} className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/76">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/38">Punkt {index + 1}</p>
+                        <p className="mt-2">{item}</p>
                       </div>
                     ))}
                   </div>
                 </div>
+              </div>
 
-                <div className="rounded-[1.8rem] border border-white/5 bg-white/[0.025] p-7">
-                  <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.22em] text-bjj-gold">
-                    <Info className="h-4 w-4" />
-                    Why It Matters
-                  </p>
-                  <div className="mt-5 rounded-[1.2rem] border border-white/7 bg-[#101319] p-5">
-                    <p className="text-sm leading-8 text-white/72">{currentNode.why}</p>
-                  </div>
-
-                  <p className="mt-6 text-[11px] font-black uppercase tracking-[0.22em] text-white/42">Sparring Focus</p>
-                  <div className="mt-4 rounded-[1.2rem] border border-white/7 bg-[#101319] p-5">
-                    <p className="text-sm leading-8 text-white/72">
-                      {currentNode.sparringFocus || 'Hier kannst du spaeter den konkreten Sparring-Fokus der Technik hinterlegen.'}
-                    </p>
-                  </div>
+              <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+                <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.22em] text-[#ff9e82]">
+                  <AlertTriangle className="h-4 w-4" />
+                  Fehler
+                </p>
+                <div className="mt-5 space-y-3">
+                  {(currentNode.commonErrors.length > 0
+                    ? currentNode.commonErrors
+                    : ['Hier kommen spaeter die haeufigsten Fehler dieser Technik rein.']).map((error, index) => (
+                    <div key={`${error}-${index}`} className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/76">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/38">Fehler {index + 1}</p>
+                      <p className="mt-2">{error}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-          ) : null}
 
-          {activeTab === 'errors' ? (
-            <div className="space-y-4">
-              {(currentNode.commonErrors.length > 0 ? currentNode.commonErrors : ['Hier kommen spaeter die haeufigsten Fehler dieser Technik rein.']).map(
-                (error, index) => (
-                  <div key={`${error}-${index}`} className="rounded-[1.6rem] border border-white/5 bg-white/[0.025] p-6">
-                    <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.22em] text-[#ff9e82]">
-                      <AlertTriangle className="h-4 w-4" />
-                      Fehler {index + 1}
-                    </p>
-                    <p className="mt-4 text-lg font-semibold text-white">{error}</p>
-                    <p className="mt-3 text-sm leading-8 text-white/62">
-                      Fix: Hinterlege hier pro Technik den klaren Coaching-Cue oder die Korrektur, die du spaeter anzeigen willst.
-                    </p>
+              <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#7dd3fc]">Weitere Hauptvideos</p>
+                {detailClipDeck.length > 0 ? (
+                  <div className="mt-5">
+                    <GameplanClipDeck clips={detailClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik oeffnen" />
                   </div>
-                )
-              )}
+                ) : null}
+                <div className="mt-5 space-y-4">
+                  {renderExternalSourceCards(detailSourceCards, 'Noch keine Detail-Videos mit dieser Technik verknuepft.')}
+                </div>
+              </div>
             </div>
           ) : null}
 
           {activeTab === 'counter' ? (
-            <div className="grid gap-5 md:grid-cols-2">
-              {[
-                'Typischer gegnerischer Counter',
-                'Deine direkte Antwort',
-                'Fruehes Warnsignal',
-                'Fallback auf sichere Folgeposition',
-              ].map((title) => (
-                <div key={title} className="rounded-[1.6rem] border border-white/5 bg-white/[0.025] p-6">
-                  <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.22em] text-[#9ab6ff]">
-                    <Shield className="h-4 w-4" />
-                    {title}
-                  </p>
-                  <p className="mt-4 text-sm leading-8 text-white/68">
-                    Dieser Bereich ist absichtlich als Template stehen geblieben, damit du fuer jede Technik eigene Counter-Logik
-                    hinterlegen kannst.
-                  </p>
+            <div className="space-y-5">
+              <div className="grid gap-5 md:grid-cols-3">
+                {counterItems.map((title, index) => (
+                  <div
+                    key={title}
+                    className="rounded-[1.6rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(20,25,36,0.95),rgba(12,16,24,0.94))] p-6 shadow-[0_16px_34px_rgba(0,0,0,0.18)]"
+                  >
+                    <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.22em] text-[#9ab6ff]">
+                      <Shield className="h-4 w-4" />
+                      Counter {index + 1}
+                    </p>
+                    <p className="mt-4 text-lg font-semibold text-white">{title}</p>
+                    <p className="mt-3 text-sm leading-8 text-white/62">
+                      Hinterlege hier spaeter die konkrete Antwort auf diesen Counter und den klaren Coaching-Cue.
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-6 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+                {counterClipDeck.length > 0 ? (
+                  <div className="mb-6">
+                    <GameplanClipDeck clips={counterClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik oeffnen" />
+                  </div>
+                ) : null}
+                <div className="mt-5 space-y-4">
+                  {renderExternalSourceCards(counterSourceCards, 'Noch keine Counter-Referenzen verknuepft.')}
                 </div>
-              ))}
-            </div>
-          ) : null}
-
-          {activeTab === 'videos' ? (
-            <div className="space-y-4">
-              {currentNode.videos.length > 0 ? (
-                currentNode.videos.map((video, index) => {
-                  const thumbnail = getYoutubeThumbnail(video.url)
-
-                  return (
-                    <a
-                      key={`${video.url}-${index}`}
-                      href={video.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="group grid gap-5 rounded-[1.7rem] border border-white/5 bg-white/[0.025] p-5 transition hover:border-white/10 md:grid-cols-[220px_minmax(0,1fr)]"
-                    >
-                      <div className="relative aspect-video overflow-hidden rounded-[1.2rem] bg-[#12151b]">
-                        {thumbnail ? (
-                          <img
-                            src={thumbnail}
-                            alt={video.title}
-                            className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-                          />
-                        ) : (
-                          <div className="h-full w-full bg-[linear-gradient(180deg,#1b1e25,#0f1217)]" />
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/10 backdrop-blur-md">
-                            <Play className="ml-0.5 h-6 w-6 text-white" />
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex min-w-0 flex-col justify-center">
-                        <div className="flex flex-wrap items-center gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/38">
-                          <span>{extractDomainLabel(video.url)}</span>
-                          <span>Clip {index + 1}</span>
-                        </div>
-                        <p className="mt-3 text-xl font-black text-white">{video.title}</p>
-                        <p className="mt-2 text-sm text-white/55">{video.creator}</p>
-                        {video.note ? <p className="mt-4 text-sm leading-8 text-white/66">{video.note}</p> : null}
-                        <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-bjj-gold">
-                          Video oeffnen
-                          <ArrowUpRight className="h-4 w-4" />
-                        </span>
-                      </div>
-                    </a>
-                  )
-                })
-              ) : (
-                <div className="rounded-[1.7rem] border border-dashed border-white/10 bg-white/[0.03] p-8 text-sm leading-8 text-white/55">
-                  Noch keine Videos hinterlegt.
-                </div>
-              )}
+              </div>
             </div>
           ) : null}
 
           {activeTab === 'drills' ? (
-            <div className="grid gap-5 md:grid-cols-[1.05fr_0.95fr]">
-              <div className="rounded-[1.7rem] border border-white/5 bg-white/[0.025] p-6">
-                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-bjj-gold">Main Drill</p>
-                <p className="mt-4 text-sm leading-8 text-white/72">
-                  {currentNode.drill || 'Hier kommt spaeter dein Drill-Block mit Reps, Startposition und Constraints rein.'}
-                </p>
-
-                <p className="mt-8 text-[11px] font-black uppercase tracking-[0.22em] text-white/42">Validation</p>
-                <div className="mt-4 rounded-[1.2rem] border border-white/7 bg-[#101319] p-5">
-                  <p className="text-sm font-semibold text-white">
-                    {currentNode.validationQuestion || 'Hier kannst du eine Kontrollfrage fuer diese Technik hinterlegen.'}
-                  </p>
-                  {currentNode.validationOptions?.length ? (
-                    <div className="mt-4 space-y-2">
-                      {currentNode.validationOptions.map((option) => (
-                        <div key={option} className="rounded-xl border border-white/8 px-4 py-3 text-sm text-white/66">
-                          {option}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+            <div className="space-y-5">
+              <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-6 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+                {drillClipDeck.length > 0 ? (
+                  <div className="mb-6">
+                    <GameplanClipDeck clips={drillClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik oeffnen" />
+                  </div>
+                ) : null}
+                <div className="mt-5 space-y-4">
+                  {renderExternalSourceCards(drillSourceCards, 'Noch keine Drill-Referenzen verknuepft.')}
                 </div>
               </div>
 
-              <div className="rounded-[1.7rem] border border-white/5 bg-white/[0.025] p-6">
-                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-bjj-gold">Completion Checklist</p>
-                <div className="mt-5 space-y-3">
-                  {currentNode.completionRules.length > 0 ? (
-                    currentNode.completionRules.map((rule) => {
-                      const checked = Boolean(progress[rule.id])
+              <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-bjj-gold">Related Techniques</p>
+                <div className="mt-5 grid gap-4 md:grid-cols-3">
+                  {relatedNodes.length > 0 ? (
+                    relatedNodes.map((relatedNode) => {
+                      const thumbnail = getNodeThumbnail(relatedNode)
 
                       return (
-                        <button
-                          key={rule.id}
-                          type="button"
-                          onClick={() => void toggleRule(rule.id)}
-                          className={`flex w-full items-center gap-3 rounded-[1.15rem] border px-4 py-4 text-left transition ${
-                            checked
-                              ? 'border-bjj-gold/22 bg-bjj-gold/[0.08] text-white'
-                              : 'border-white/7 bg-[#101319] text-white/72 hover:border-white/12'
-                          }`}
+                        <Link
+                          key={relatedNode.id}
+                          href={`/node/${relatedNode.id}`}
+                          className="group overflow-hidden rounded-[1.3rem] border border-white/[0.05] bg-[#101319] transition hover:border-white/[0.08]"
                         >
-                          {checked ? (
-                            <CheckCircle2 className="h-5 w-5 shrink-0 text-bjj-gold" />
-                          ) : (
-                            <Circle className="h-5 w-5 shrink-0 text-white/24" />
-                          )}
-                          <span className="text-sm font-medium">{rule.label}</span>
-                        </button>
+                          <div className="aspect-video overflow-hidden bg-[#141922]">
+                            {thumbnail ? (
+                              <img
+                                src={thumbnail}
+                                alt={relatedNode.title}
+                                className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center">
+                                <Swords className="h-5 w-5 text-white/28" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="p-4">
+                            <p className="truncate text-sm font-bold text-white">{relatedNode.title}</p>
+                            <p className="mt-1 text-xs text-white/40">{getDifficultyLabel(relatedNode.level)}</p>
+                          </div>
+                        </Link>
                       )
                     })
                   ) : (
-                    <div className="rounded-[1.15rem] border border-dashed border-white/10 bg-[#101319] p-4 text-sm text-white/55">
-                      Keine Completion Rules angelegt.
+                    <div className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/55">
+                      Keine weiterfuehrenden Techniken gefunden.
                     </div>
                   )}
                 </div>
               </div>
             </div>
           ) : null}
+
+          {activeTab === 'followups' ? (
+            <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#9ab6ff]">Follow-Ups</p>
+                  <p className="mt-2 text-sm text-white/62">
+                    Das sind die Techniken, die in deinem aktuellen Gameplan direkt als Nächstes folgen koennen.
+                  </p>
+                </div>
+              </div>
+
+              {followUps.length > 0 ? (
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {followUps.map((followUp) => (
+                    <Link
+                      key={followUp.sourcePlanNodeId}
+                      href={`/node/${followUp.id}`}
+                      className="group rounded-[1.3rem] border border-white/[0.05] bg-[#101319] p-3 transition hover:border-white/[0.08]"
+                    >
+                      <div className="relative aspect-video overflow-hidden rounded-[1.05rem] bg-[#141922]">
+                        {followUp.image ? (
+                          <img
+                            src={followUp.image}
+                            alt={followUp.title}
+                            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.04]"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <ChevronRight className="h-6 w-6 text-white/26" />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                        <div className="absolute left-3 top-3 rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/70">
+                          {followUp.stage}
+                        </div>
+                      </div>
+                      <div className="mt-3 min-w-0">
+                        <p className="truncate text-sm font-bold text-white">{followUp.title}</p>
+                        <p className="mt-1 line-clamp-2 text-xs text-white/46">{followUp.subtitle}</p>
+                        <p className="mt-3 text-[10px] font-black uppercase tracking-[0.18em] text-bjj-gold/80">
+                          {followUp.videosCount} Detail-Videos
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-5 rounded-[1.2rem] border border-white/[0.05] bg-[#101319] p-8 text-center text-sm text-white/55">
+                  Fuer diese Technik sind aktuell noch keine Follow-Ups verknuepft.
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
 
         <aside className="space-y-6">
-          <div className="rounded-[2rem] border border-white/6 bg-[linear-gradient(180deg,#151515,#111318)] p-6 shadow-[0_26px_70px_rgba(0,0,0,0.3)] md:p-7">
+          <div className="rounded-[2rem] border border-white/[0.05] bg-[linear-gradient(180deg,#151515,#111318)] p-6 shadow-[0_26px_70px_rgba(0,0,0,0.3)] md:p-7">
             <div className="space-y-6">
-              <div className="rounded-[1.6rem] border border-white/8 bg-white/[0.03] p-5">
+              <div className="rounded-[1.6rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(21,25,35,0.96),rgba(14,18,26,0.94))] p-5">
                 <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/36">Coach</p>
                 <div className="mt-4 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
@@ -636,7 +959,7 @@ export default function NodeDetailPage() {
                         className={`flex items-center gap-3 rounded-[1.2rem] border px-4 py-4 transition ${
                           index === 0
                             ? 'border-[#7b4928] bg-[#342218] text-white hover:brightness-105'
-                            : 'border-white/5 bg-white/[0.02] text-white/55 hover:border-white/10 hover:text-white/78'
+                              : 'border-white/[0.05] bg-[linear-gradient(180deg,rgba(21,25,35,0.96),rgba(14,18,26,0.94))] text-white/55 hover:border-white/[0.08] hover:text-white/78'
                         }`}
                       >
                         {index === 0 ? <Unlock className="h-4 w-4 text-[#ff8a42]" /> : <Lock className="h-4 w-4 text-white/22" />}
@@ -644,74 +967,73 @@ export default function NodeDetailPage() {
                       </Link>
                     ))
                   ) : (
-                    <div className="rounded-[1.2rem] border border-white/6 bg-white/[0.03] px-4 py-4 text-sm text-white/55">
+                    <div className="rounded-[1.2rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(21,25,35,0.96),rgba(14,18,26,0.94))] px-4 py-4 text-sm text-white/55">
                       Keine direkten Unlocks hinterlegt.
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="border-t border-white/8 pt-6">
-                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/36">Related Techniques</p>
-                <div className="mt-5 space-y-4">
-                  {relatedNodes.length > 0 ? (
-                    relatedNodes.map((relatedNode, index) => {
-                      const thumbnail = getNodeThumbnail(relatedNode)
-                      const categoryLabel = index === 0 ? 'Sweep' : index === 1 ? 'Submission' : 'System'
-
-                      return (
-                        <Link key={relatedNode.id} href={`/node/${relatedNode.id}`} className="group flex items-center gap-3">
-                          <div className="h-14 w-14 overflow-hidden rounded-[0.9rem] border border-white/8 bg-white/[0.04]">
-                            {thumbnail ? (
-                              <img
-                                src={thumbnail}
-                                alt={relatedNode.title}
-                                className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center bg-[#11151b]">
-                                <Swords className="h-4 w-4 text-white/32" />
-                              </div>
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-bold text-white">{relatedNode.title}</p>
-                            <p className="mt-0.5 text-xs text-white/38">{`${categoryLabel} • ${getDifficultyLabel(relatedNode.level)}`}</p>
-                          </div>
-                        </Link>
-                      )
-                    })
-                  ) : (
-                    <div className="rounded-[1.2rem] border border-white/6 bg-white/[0.03] px-4 py-4 text-sm text-white/55">
-                      Keine verwandten Techniken gefunden.
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
 
-          <div className="rounded-[2rem] border border-white/5 bg-white/[0.02] p-6">
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/36">Technique Meta</p>
-            <div className="mt-5 space-y-3">
-              <div className="rounded-[1.2rem] border border-white/7 bg-[#101319] p-4">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/36">Track</p>
-                <p className="mt-2 text-base font-black text-white">{currentNode.track}</p>
-              </div>
-              <div className="rounded-[1.2rem] border border-white/7 bg-[#101319] p-4">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/36">Prerequisites</p>
-                <p className="mt-2 text-base font-black text-white">{currentNode.prerequisites.length}</p>
-              </div>
-              <div className="rounded-[1.2rem] border border-white/7 bg-[#101319] p-4">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/36">Main Focus</p>
-                <p className="mt-2 text-sm leading-7 text-white/76">{currentNode.subtitle}</p>
-              </div>
-              <div className="rounded-[1.2rem] border border-white/7 bg-[#101319] p-4">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-white/36">Checklist</p>
-                <p className="mt-2 text-base font-black text-white">
-                  {formatChecklistStatus(progress, currentNode.completionRules.map((rule) => rule.id))}
-                </p>
-              </div>
+          <div className="rounded-[2rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(18,23,33,0.9),rgba(12,16,24,0.88))] p-6 shadow-[0_20px_40px_rgba(0,0,0,0.18)]">
+            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/36">Video Queue</p>
+            <div className="mt-5 max-h-[420px] space-y-3 overflow-y-auto pr-1">
+              {sidebarVideos.length > 0 ? (
+                sidebarVideos.map((video, index) => {
+                  const thumbnail = getYoutubeThumbnail(video.url)
+                  const content = (
+                    <>
+                      <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded-[0.9rem] bg-[#161b24]">
+                        {thumbnail ? (
+                          <img
+                            src={thumbnail}
+                            alt={video.title}
+                            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <Play className="h-4 w-4 text-white/32" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-white">{video.title}</p>
+                        <p className="mt-1 text-xs text-white/40">{video.creator}</p>
+                      </div>
+                    </>
+                  )
+
+                  if ('detailHref' in video && typeof video.detailHref === 'string') {
+                    return (
+                      <Link
+                        key={`${video.url}-sidebar-${index}`}
+                        href={video.detailHref}
+                        className="group flex items-center gap-3 rounded-[1.2rem] border border-white/[0.05] bg-[#101319] p-3 transition hover:border-white/[0.08]"
+                      >
+                        {content}
+                      </Link>
+                    )
+                  }
+
+                  return (
+                    <a
+                      key={`${video.url}-sidebar-${index}`}
+                      href={video.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-center gap-3 rounded-[1.2rem] border border-white/[0.05] bg-[#101319] p-3 transition hover:border-white/[0.08]"
+                    >
+                      {content}
+                    </a>
+                  )
+                })
+              ) : (
+                <div className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/55">
+                  Noch keine Videos hinterlegt.
+                </div>
+              )}
             </div>
           </div>
         </aside>
@@ -735,10 +1057,14 @@ export default function NodeDetailPage() {
         </button>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-8 flex flex-wrap items-center gap-4">
         <Link href="/gameplan" className="inline-flex items-center gap-2 text-sm font-semibold text-white/42 transition hover:text-white/72">
           <ChevronLeft className="h-4 w-4" />
           Zurueck zum Gameplan
+        </Link>
+        <Link href="/technique-library" className="inline-flex items-center gap-2 text-sm font-semibold text-white/42 transition hover:text-white/72">
+          <ChevronLeft className="h-4 w-4" />
+          Zurueck zur Technik Bibliothek
         </Link>
       </div>
     </div>

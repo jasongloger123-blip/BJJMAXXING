@@ -101,7 +101,7 @@ export default function ReviewPage() {
           </div>
 
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Notizen</p>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Technik</p>
             <textarea
               value={notes}
               onChange={(event) => setNotes(event.target.value)}

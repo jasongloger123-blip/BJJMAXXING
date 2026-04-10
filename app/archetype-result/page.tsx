@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ARCHETYPES } from '@/lib/archetypes'
 import { ArchetypeCard } from '@/components/ArchetypeCard'
@@ -13,7 +13,9 @@ export default function ArchetypeResultPage() {
   const supabase = createClient()
   const [result, setResult] = useState<ArchetypeResultData | null>(null)
   const [authenticated, setAuthenticated] = useState(false)
+  const [hasPendingSelection, setHasPendingSelection] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [savingSelection, setSavingSelection] = useState(false)
 
   const loadResult = useCallback(async () => {
     const stored = readArchetypeResult()
@@ -24,6 +26,7 @@ export default function ArchetypeResultPage() {
 
     const isAuthenticated = Boolean(user)
     setAuthenticated(isAuthenticated)
+    setHasPendingSelection(Boolean(readPendingArchetypeResult()))
 
     if (!stored && !user) {
       router.push('/archetype-test')
@@ -31,18 +34,6 @@ export default function ArchetypeResultPage() {
     }
 
     if (user) {
-      const pending = readPendingArchetypeResult()
-
-      if (pending) {
-        await supabase.from('user_profiles').upsert({
-          id: user.id,
-          primary_archetype: pending.primary.id,
-          secondary_archetype: pending.secondary.id,
-        })
-        clearPendingArchetypeResult()
-        window.dispatchEvent(new Event('profile-ready-changed'))
-      }
-
       if (stored) {
         setResult(stored)
         setLoading(false)
@@ -78,151 +69,160 @@ export default function ArchetypeResultPage() {
     router.push('/archetype-test')
   }, [router, supabase])
 
+  async function continueWithArchetype() {
+    if (!result) return
+
+    if (!authenticated) {
+      router.push('/register')
+      return
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      router.push('/login')
+      return
+    }
+
+    setSavingSelection(true)
+
+    const { error } = await supabase.from('user_profiles').upsert({
+      id: user.id,
+      primary_archetype: result.primary.id,
+      secondary_archetype: result.secondary.id,
+    })
+
+    setSavingSelection(false)
+    if (error) {
+      return
+    }
+
+    clearPendingArchetypeResult()
+    setHasPendingSelection(false)
+    window.dispatchEvent(new Event('profile-ready-changed'))
+    router.push('/')
+  }
+
   useEffect(() => {
     void loadResult()
   }, [loadResult])
 
-  const maxScore = useMemo(() => {
-    if (!result) return 0
-    return Math.max(...Object.values(result.scores))
-  }, [result])
-
   if (loading || !result) {
-    return <div className="landing-shell min-h-screen" />
+    return <div className="min-h-screen bg-[#0d0b09]" />
   }
 
   if (!authenticated) {
     return (
-      <div className="landing-shell min-h-screen text-white">
-        <main className="relative px-6 pb-20 pt-24">
-          <div className="fixed -left-24 -top-24 h-64 w-64 rounded-full bg-[#ff00ff]/10 blur-[120px] pointer-events-none md:h-96 md:w-96" />
-          <div className="fixed right-[-6rem] top-1/2 h-64 w-64 rounded-full bg-[#00f2ff]/10 blur-[120px] pointer-events-none md:h-96 md:w-96" />
-
-          <div className="mx-auto max-w-4xl text-center">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#ccff00]">Quiz abgeschlossen</p>
-            <h1 className="font-public-display mt-4 text-4xl font-black uppercase tracking-tight md:text-6xl">
-              Dein Ergebnis ist <span className="landing-neon-text">bereit</span>
-            </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-base text-slate-400 md:text-lg">
-              Wir haben deinen Archetyp analysiert. Schalte jetzt dein Ergebnis frei und speichere es direkt in deinem Profil.
+      <div className="min-h-screen bg-[#0d0b09] text-white">
+        <main className="mx-auto flex min-h-screen w-full max-w-5xl items-center px-6 py-10 md:px-8">
+          <section className="w-full rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-8 text-center shadow-card md:px-10 md:py-10">
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Quiz abgeschlossen</p>
+            <h1 className="mt-4 text-4xl font-black tracking-[-0.04em] md:text-6xl">Dein Archetyp ist bereit</h1>
+            <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/64 md:text-base">
+              Registriere dich, dann speichern wir dein Ergebnis direkt im Profil und starten mit deinem passenden Gameplan.
             </p>
 
-            <div className="mt-12 rounded-[2rem] border border-white/10 bg-white/5 p-6 backdrop-blur-md md:p-10">
-              <div className="mx-auto max-w-2xl blur-[8px] saturate-75">
+            <div className="mt-10 rounded-[2rem] border border-bjj-border bg-bjj-card p-5 md:p-7">
+              <div className="mx-auto max-w-2xl blur-[6px] saturate-75">
                 <ArchetypeCard archetype={result.primary} highlight />
               </div>
-              <div className="mt-8">
-                <p className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Registrierung noetig fuer:
-                </p>
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  {['Voller Archetyp', 'Gespeicherter Startplan', 'Naechster sinnvoller Schritt'].map((item) => (
-                    <div key={item} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm font-semibold text-white/85">
-                      {item}
-                    </div>
-                  ))}
-                </div>
+              <div className="mt-6 grid gap-3 md:grid-cols-3">
+                {['Dein Haupt-Archetyp', 'Persoenlicher Startplan', 'Direkter Einstieg ins System'].map((item) => (
+                  <div key={item} className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-4 text-sm font-semibold text-white/85">
+                    {item}
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+          <div className="mt-8 flex flex-col justify-center gap-4 sm:flex-row">
               <Link
                 href="/register"
-                className="rounded-full bg-white px-8 py-5 text-lg font-black uppercase tracking-tight text-[#0f1419] transition-transform hover:scale-105"
+                className="inline-flex items-center justify-center rounded-2xl bg-bjj-gold px-8 py-4 text-base font-black uppercase tracking-[0.12em] text-bjj-coal transition hover:bg-bjj-orange-light"
               >
                 Ergebnis freischalten
               </Link>
-            </div>
-
-            <p className="mt-5 text-sm text-slate-400">
-              Schon registriert?{' '}
-              <Link href="/login" className="font-semibold text-white transition-colors hover:text-[#00f2ff]">
-                Dann hier einloggen
+              <Link
+                href="/login"
+                className="inline-flex items-center justify-center rounded-2xl border border-bjj-border bg-bjj-card px-8 py-4 text-base font-black uppercase tracking-[0.12em] text-white/82 transition hover:border-bjj-gold/25 hover:text-white"
+              >
+                Einloggen
               </Link>
-            </p>
-          </div>
+            </div>
+          </section>
         </main>
       </div>
     )
   }
 
   return (
-    <div className="landing-shell min-h-screen text-white">
-      <main className="relative px-6 pb-20 pt-24">
-        <div className="fixed -left-24 -top-24 h-64 w-64 rounded-full bg-[#ff00ff]/10 blur-[120px] pointer-events-none md:h-96 md:w-96" />
-        <div className="fixed right-[-6rem] top-1/2 h-64 w-64 rounded-full bg-[#00f2ff]/10 blur-[120px] pointer-events-none md:h-96 md:w-96" />
+    <div className="min-h-screen bg-[#0d0b09] text-white">
+      <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-10 md:px-8">
+        <section className="w-full rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-8 shadow-card md:px-10 md:py-10">
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Dein Ergebnis</p>
+          <h1 className="mt-4 text-4xl font-black tracking-[-0.04em] md:text-6xl">Das ist dein Archetyp</h1>
 
-        <div className="mx-auto max-w-4xl space-y-6">
-          <div className="text-center">
-            <p className="text-sm font-bold uppercase tracking-[0.24em] text-[#ccff00]">Dein Ergebnis</p>
-            <h1 className="font-public-display mt-3 text-4xl font-black uppercase tracking-tight md:text-6xl">
-              Dein Archetyp und dein Startpunkt
-            </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-sm text-slate-400 md:text-base">
-              Du bekommst keinen riesigen Technikbaum. Du bekommst einen festen BJJ-Plan mit dem naechsten klaren Schritt.
-            </p>
-          </div>
+          <div className="mt-10 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <ArchetypeCard archetype={result.primary} highlight />
 
-          <ArchetypeCard archetype={result.primary} highlight />
+            <div className="rounded-[2rem] border border-[rgba(212,135,95,0.14)] bg-[linear-gradient(180deg,rgba(28,21,16,0.96),rgba(20,15,12,0.98))] p-6 shadow-card">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Warum das passt</p>
 
-          <div className="grid gap-6 md:grid-cols-[0.9fr_1.1fr]">
-            <div className="landing-glass-card rounded-3xl p-6">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Sekundaerer Archetyp</p>
-              <div className="mt-4">
-                <ArchetypeCard archetype={result.secondary} compact />
-              </div>
-            </div>
-
-            <div className="landing-glass-card rounded-3xl p-6">
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Scoring-Matrix</p>
-              <div className="mt-5 space-y-4">
-                {ARCHETYPES.map((archetype) => {
-                  const score = result.scores[archetype.id] ?? 0
-                  const width = maxScore ? (score / maxScore) * 100 : 0
-
-                  return (
-                    <div key={archetype.id}>
-                      <div className="mb-2 flex items-center justify-between text-sm">
-                        <span>{archetype.name}</span>
-                        <span className="text-slate-400">{score.toFixed(score % 1 === 0 ? 0 : 1)} Punkte</span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full rounded-full bg-[linear-gradient(90deg,#ff00ff,#00f2ff)]" style={{ width: `${width}%` }} />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="landing-glass-card rounded-[2rem] p-6">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#ccff00]">Dein MVP Plan</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-5">
-              {['Entry', 'Position', 'Control', 'Transition', 'Finish'].map((phase, index) => (
-                <div key={phase} className="rounded-2xl border border-white/10 bg-black/10 px-4 py-4 text-center">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Node {index + 1}</p>
-                  <p className="mt-2 font-semibold">{phase}</p>
+              <div className="mt-5">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/45">Win Path</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {result.primary.winPath.map((step) => (
+                    <span key={step} className="rounded-full border border-bjj-gold/20 bg-bjj-gold/10 px-3 py-1 text-xs font-semibold text-bjj-gold">
+                      {step}
+                    </span>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              <div className="mt-6">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/45">Schwerpunkt</p>
+                <p className="mt-3 text-lg font-semibold text-white">{result.primary.topStyle}</p>
+              </div>
+
+              <div className="mt-6">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/45">Primaere Systeme</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {result.primary.primarySystems.map((system) => (
+                    <span key={system} className="rounded-full border border-bjj-border bg-bjj-surface px-3 py-1 text-xs font-semibold text-white/82">
+                      {system}
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button
-              onClick={() => router.push('/')}
-              className="rounded-full bg-white px-8 py-4 text-lg font-black text-[#0f1419] transition-transform hover:scale-105"
+              onClick={() => void continueWithArchetype()}
+              disabled={savingSelection}
+              className="rounded-2xl bg-bjj-gold px-8 py-4 text-base font-black uppercase tracking-[0.12em] text-bjj-coal transition hover:bg-bjj-orange-light disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Weiter
+              {savingSelection ? 'Speichert...' : 'Weiter'}
             </button>
             <button
               onClick={() => router.push('/archetype-test')}
-              className="rounded-full border border-white/20 bg-white/10 px-8 py-4 text-lg font-semibold transition-transform hover:scale-105"
+              className="rounded-2xl border border-bjj-border bg-bjj-card px-8 py-4 text-base font-black uppercase tracking-[0.12em] text-white/82 transition hover:border-bjj-gold/25 hover:text-white"
             >
               Test wiederholen
             </button>
+            {hasPendingSelection ? (
+              <button
+                onClick={() => router.push('/archetype-select')}
+                className="rounded-2xl border border-bjj-gold/20 bg-bjj-gold/10 px-8 py-4 text-base font-black uppercase tracking-[0.12em] text-bjj-gold transition hover:bg-bjj-gold/15"
+              >
+                Archetypen auswaehlen
+              </button>
+            ) : null}
           </div>
-        </div>
+        </section>
       </main>
     </div>
   )
