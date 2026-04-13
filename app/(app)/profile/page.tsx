@@ -677,27 +677,17 @@ export default function ProfilePage() {
       ) : null}
 
       {/* Mobile Logout Button - nur auf kleinen Screens sichtbar */}
-      <div className="mt-8 lg:hidden">
-        <div className="rounded-[1.55rem] border border-red-500/20 bg-red-500/10 p-4">
-          <div className="flex items-center gap-3 text-xs font-black uppercase tracking-[0.24em] text-red-400">
-            <LogOut className="h-4 w-4" />
-            Sitzung
-          </div>
-          <h2 className="mt-2 text-lg font-black tracking-[-0.03em] text-white">Ausloggen</h2>
-          <p className="mt-1 text-sm leading-relaxed text-bjj-muted">
-            Beende deine Sitzung und logge dich aus dem Konto aus.
-          </p>
-          <button
-            type="button"
-            onClick={async () => {
-              await supabase.auth.signOut({ scope: 'global' })
-              window.location.replace('/?logged_out=1')
-            }}
-            className="mt-4 w-full rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-3 text-sm font-black text-red-400 transition hover:bg-red-500/20"
-          >
-            Ausloggen
-          </button>
-        </div>
+      <div className="mt-6 lg:hidden">
+        <button
+          type="button"
+          onClick={async () => {
+            await supabase.auth.signOut({ scope: 'global' })
+            window.location.replace('/?logged_out=1')
+          }}
+          className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-5 py-4 text-sm font-black text-bjj-muted transition hover:border-red-500/30 hover:text-red-400"
+        >
+          Ausloggen
+        </button>
       </div>
     </>
   )

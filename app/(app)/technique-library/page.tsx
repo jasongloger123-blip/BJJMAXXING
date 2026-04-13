@@ -345,8 +345,8 @@ export default function TechniqueLibraryPage() {
 
   return (
     <div className="min-h-screen bg-bjj-bg">
-      {/* Header */}
-      <section className="relative overflow-hidden rounded-[1.65rem] border border-white/10 bg-[linear-gradient(135deg,rgba(17,20,30,0.98),rgba(11,14,21,0.94))] shadow-[0_28px_70px_rgba(0,0,0,0.28)]]">
+      {/* Header - nur auf Desktop sichtbar */}
+      <section className="relative hidden overflow-hidden rounded-[1.65rem] border border-white/10 bg-[linear-gradient(135deg,rgba(17,20,30,0.98),rgba(11,14,21,0.94))] shadow-[0_28px_70px_rgba(0,0,0,0.28)]] lg:block">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(245,191,88,0.3),transparent_24%),radial-gradient(circle_at_74%_20%,rgba(122,162,255,0.28),transparent_26%),radial-gradient(circle_at_68%_72%,rgba(238,98,149,0.22),transparent_24%),linear-gradient(135deg,rgba(24,29,42,0.16),rgba(8,11,17,0.08))]" />
         <div className="absolute inset-0 bg-[linear-gradient(130deg,rgba(255,255,255,0.18)_0%,rgba(255,255,255,0.02)_22%,transparent_22%),linear-gradient(145deg,transparent_0%,transparent_54%,rgba(255,255,255,0.08)_54%,rgba(255,255,255,0.01)_74%,transparent_74%)] mix-blend-screen" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(6,8,13,0.84)_0%,rgba(8,11,17,0.72)_34%,rgba(8,11,17,0.38)_58%,rgba(8,11,17,0.08)_100%)]" />
