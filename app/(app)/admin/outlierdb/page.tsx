@@ -372,6 +372,7 @@ export default function AdminOutlierDbPage() {
   const [selectedRole, setSelectedRole] = useState<ExternalSourceRole>('main_reference')
   const [selectedContentType, setSelectedContentType] = useState<ClipContentType>('technical_demo')
   const [selectedLearningPhase, setSelectedLearningPhase] = useState<ClipLearningPhase>('core_mechanic')
+  const [followUpSequence, setFollowUpSequence] = useState<Array<{ nodeId: string; title: string }>>([])
   const [followUpNodeIds, setFollowUpNodeIds] = useState<string[]>([])
   const [mappingNotes, setMappingNotes] = useState('')
   const [recommendedArchetypeIds, setRecommendedArchetypeIds] = useState<string[]>([])
@@ -461,10 +462,16 @@ export default function AdminOutlierDbPage() {
   }, [selectedNodeId, techniqueOptions])
 
   useEffect(() => {
-    if (selectedRole !== 'related_reference' && followUpNodeIds.length > 0) {
+    if (selectedRole !== 'related_reference') {
       setFollowUpNodeIds([])
+      setFollowUpSequence([])
     }
-  }, [followUpNodeIds.length, selectedRole])
+  }, [selectedRole])
+
+  useEffect(() => {
+    setFollowUpSequence([])
+    setFollowUpNodeIds([])
+  }, [selectedNodeId])
 
   useEffect(() => {
     const customTechnique = customTechniques.find((entry) => entry.id === selectedNodeId)
@@ -699,7 +706,23 @@ export default function AdminOutlierDbPage() {
     )
   }
 
+  function handleAddFollowUpStep(nodeId: string, title: string) {
+    setFollowUpSequence((current) => [...current, { nodeId, title }])
+    setFollowUpNodeIds((current) => [...current, nodeId])
+  }
+
+  function handleRemoveFollowUpStep(index: number) {
+    setFollowUpSequence((current) => {
+      const removed = current[index]
+      if (removed) {
+        setFollowUpNodeIds((ids) => ids.filter((id) => id !== removed.nodeId))
+      }
+      return current.filter((_, i) => i !== index)
+    })
+  }
+
   function handleToggleFollowUpNode(nodeId: string) {
+    // Legacy - nicht mehr verwendet, aber behalten wir für Kompatibilität
     setFollowUpNodeIds((current) =>
       current.includes(nodeId) ? current.filter((entry) => entry !== nodeId) : [...current, nodeId]
     )
@@ -1395,38 +1418,80 @@ export default function AdminOutlierDbPage() {
                         </div>
 
                         {selectedRole === 'related_reference' ? (
-                          <div className="rounded-2xl border border-bjj-border bg-bjj-surface p-4">
+                          <div className="rounded-2xl border border-bjj-border bg-bjj-surface p-4 space-y-4">
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">Follow-up Zielnodes</p>
+                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">Follow-up Sequenz</p>
                                 <p className="mt-2 text-sm text-bjj-muted">
-                                  Optional: Wenn der Follow-up-Clip fuer weitere Techniken gelten soll, markiere sie hier. Ohne Auswahl bleibt er allgemein beim oben gewaehlten Node.
+                                  Erstelle eine Kette: Von "{selectedTechnique?.title || selectedNodeId}" zu Zwischenschritten.
+                                  <br />
+                                  <span className="text-bjj-gold">Beispiel:</span> Standing → Butterfly Guard → Standing
                                 </p>
                               </div>
                               <span className="rounded-full border border-bjj-border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-bjj-muted">
-                                {followUpNodeIds.length}
+                                {followUpSequence.length} Schritte
                               </span>
                             </div>
-                            <div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
-                              {techniqueOptions
-                                .filter((technique) => technique.id !== selectedNodeId)
-                                .map((technique) => {
-                                  const active = followUpNodeIds.includes(technique.id)
-                                  return (
+
+                            {/* Aktuelle Sequenz anzeigen */}
+                            {followUpSequence.length > 0 ? (
+                              <div className="rounded-xl border border-bjj-border bg-bjj-card p-3">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-bjj-gold mb-2">Aktuelle Sequenz</p>
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className="px-2 py-1 rounded-lg bg-bjj-gold/20 text-bjj-gold text-xs font-semibold">
+                                    {selectedTechnique?.title || selectedNodeId}
+                                  </span>
+                                  {followUpSequence.map((step, index) => (
+                                    <div key={step.nodeId} className="flex items-center">
+                                      <span className="text-bjj-muted mx-1">→</span>
+                                      <span className="px-2 py-1 rounded-lg bg-bjj-surface border border-bjj-border text-bjj-text text-xs">
+                                        {step.title}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveFollowUpStep(index)}
+                                        className="ml-1 text-bjj-muted hover:text-red-400 transition-colors"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-bjj-muted italic">
+                                Noch keine Schritte hinzugefügt. Wähle unten Techniken aus.
+                              </p>
+                            )}
+
+                            {/* Schritt hinzufügen */}
+                            <div className="space-y-2">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-bjj-gold">Nächsten Schritt hinzufügen</p>
+                              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                                {techniqueOptions
+                                  .filter((technique) => {
+                                    // Nur Techniken anzeigen die noch nicht in Sequenz sind
+                                    const usedIds = new Set(followUpSequence.map(s => s.nodeId))
+                                    return technique.id !== selectedNodeId && !usedIds.has(technique.id)
+                                  })
+                                  .map((technique) => (
                                     <button
                                       key={technique.id}
                                       type="button"
-                                      onClick={() => handleToggleFollowUpNode(technique.id)}
-                                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
-                                        active ? 'border-bjj-gold bg-bjj-gold/10 text-white' : 'border-bjj-border bg-bjj-card text-bjj-muted'
-                                      }`}
+                                      onClick={() => handleAddFollowUpStep(technique.id, technique.title)}
+                                      className="w-full rounded-xl border border-bjj-border bg-bjj-card px-3 py-2 text-left text-sm text-bjj-muted hover:border-bjj-gold/40 hover:text-white transition-colors"
                                     >
                                       <span className="font-semibold">{technique.title}</span>
                                       <span className="ml-2 text-xs text-bjj-muted">{technique.subtitle}</span>
                                     </button>
-                                  )
-                                })}
+                                  ))}
+                              </div>
                             </div>
+
+                            {/* Hinweis */}
+                            <p className="text-xs text-bjj-muted">
+                              Der Clip wird für ALLE Nodes in dieser Sequenz verfügbar sein.
+                            </p>
                           </div>
                         ) : null}
 

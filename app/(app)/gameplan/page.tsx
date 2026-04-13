@@ -2358,7 +2358,7 @@ export default function GameplanPage() {
   }
 
   return (
-    <div className={`${shouldRenderSelectedPlan ? 'h-full bg-transparent overflow-hidden' : 'min-h-screen bg-transparent px-3 py-4 md:px-5 md:py-5'}`}>
+    <div className={`${shouldRenderSelectedPlan ? 'fixed inset-0 z-10 bg-transparent lg:static lg:inset-auto lg:z-auto' : 'min-h-screen bg-transparent px-3 py-4 md:px-5 md:py-5'}`}>
       {gameplanUnlockAnimation ? (
         <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
           <div className="start-home-unlock-vignette absolute inset-0" />
@@ -2568,10 +2568,10 @@ export default function GameplanPage() {
             </div>
           ) : (
             /* Selected Plan View */
-            <div className="h-full">
+            <div className="h-screen lg:h-auto">
               <div
                 ref={viewportRef}
-                className="relative h-full min-h-[100dvh] overflow-hidden border border-white/[0.06] bg-[radial-gradient(circle_at_top_left,rgba(217,137,88,0.08),transparent_22%),radial-gradient(circle_at_top_right,rgba(109,128,255,0.08),transparent_24%),radial-gradient(circle_at_bottom_right,rgba(150,108,255,0.06),transparent_24%),linear-gradient(180deg,rgba(12,16,24,0.94),rgba(11,15,23,0.92))] select-none lg:min-h-screen"
+                className="relative h-full min-h-screen overflow-auto border border-white/[0.06] bg-[radial-gradient(circle_at_top_left,rgba(217,137,88,0.08),transparent_22%),radial-gradient(circle_at_top_right,rgba(109,128,255,0.08),transparent_24%),radial-gradient(circle_at_bottom_right,rgba(150,108,255,0.06),transparent_24%),linear-gradient(180deg,rgba(12,16,24,0.94),rgba(11,15,23,0.92))] select-none lg:h-auto lg:min-h-screen lg:overflow-hidden"
                 onWheel={handleWheel}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}

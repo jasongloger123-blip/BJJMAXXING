@@ -13,6 +13,7 @@ import { YoutubeEmbed } from '@/components/YoutubeEmbed'
 import { getNodeById } from '@/lib/nodes'
 import { getFlagSvgUrl } from '@/lib/countries'
 import { getTechniqueCatalogEntryForPlanNode } from '@/lib/technique-catalog'
+import { hasAdminAccess, isAdminEmail } from '@/lib/admin-access'
 import { readCustomTechniques } from '@/lib/custom-techniques'
 import { calculateClipProgressForNode, getClipProgressLookupIds } from '@/lib/clip-progress'
 
@@ -337,6 +338,7 @@ export default function StartHome() {
   const [videoKey, setVideoKey] = useState(0)
   const [playbackRate, setPlaybackRate] = useState(1)
   const [profileLoaded, setProfileLoaded] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
   const videoShellRef = useRef<HTMLDivElement | null>(null)
   const progressBarRef = useRef<HTMLDivElement | null>(null)
   const swapTimerRef = useRef<number | null>(null)
@@ -405,6 +407,9 @@ export default function StartHome() {
         gymUnlistedName: profile?.gym_unlisted_name ?? null,
       })
       setUsernameDraft(profile?.username ?? '')
+      
+      // Check admin status
+      setIsAdmin(isAdminEmail(profile?.email ?? user.email))
       const progressRows = (progressResult.data ?? []) as ProgressRow[]
       setCompletedIds(progressRows.filter((entry) => entry.completed).map((entry) => entry.node_id))
       setValidatedIds(progressRows.filter((entry) => entry.validated).map((entry) => entry.node_id))
@@ -2169,14 +2174,25 @@ export default function StartHome() {
             {visibleCardResolvedClip?.url && (
               <div className="flex flex-wrap items-center justify-between gap-3 border-y border-white/10 bg-white/[0.02] py-3 px-3">
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Desktop: Zum Start mit Text */}
                   <button
                     type="button"
                     onClick={() => setVideoKey((prev) => prev + 1)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-bjj-gold/30 bg-bjj-gold/10 px-4 py-2.5 text-sm font-medium text-bjj-gold transition hover:bg-bjj-gold/20"
+                    className="hidden lg:inline-flex items-center gap-2 rounded-lg border border-bjj-gold/30 bg-bjj-gold/10 px-4 py-2.5 text-sm font-medium text-bjj-gold transition hover:bg-bjj-gold/20"
                     title="Zum Clip-Start springen"
                   >
                     <RotateCcw className="h-4 w-4" />
                     <span>Zum Start</span>
+                  </button>
+                  
+                  {/* Mobile: Nur Icon */}
+                  <button
+                    type="button"
+                    onClick={() => setVideoKey((prev) => prev + 1)}
+                    className="lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-lg border border-bjj-gold/30 bg-bjj-gold/10 text-bjj-gold transition hover:bg-bjj-gold/20"
+                    title="Zum Clip-Start springen"
+                  >
+                    <RotateCcw className="h-5 w-5" />
                   </button>
 
                   <label className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-sm font-medium text-white/80">
@@ -2196,7 +2212,7 @@ export default function StartHome() {
                   </label>
                 </div>
 
-                {/* Favorite Button */}
+                {/* Favorite Button - Desktop mit Text, Mobile nur Icon */}
                 <button
                   type="button"
                   onClick={async () => {
@@ -2239,11 +2255,60 @@ export default function StartHome() {
                     isSavedClip
                       ? 'border-bjj-gold/40 bg-bjj-gold/16 text-bjj-gold'
                       : 'border-white/10 bg-white/[0.05] text-white/80 hover:bg-white/[0.1] hover:text-white'
-                  }`}
+                  } ${'hidden lg:inline-flex'}`}
                   title={isSavedClip ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen'}
                 >
                   <Bookmark className={`h-4 w-4 ${isSavedClip ? 'fill-current' : ''}`} />
                   <span>{isSavedClip ? 'Gespeichert' : 'Favorit'}</span>
+                </button>
+                
+                {/* Mobile: Nur Bookmark Icon */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!startState || !visibleCardResolvedClip) return
+                    setIsLoadingSaved(true)
+
+                    const { data: auth } = await supabase.auth.getUser()
+                    const user = auth.user
+
+                    if (!user) {
+                      router.push('/login')
+                      setIsLoadingSaved(false)
+                      return
+                    }
+
+                    const clipId = activeSavedClipId
+                    if (!clipId) {
+                      setIsLoadingSaved(false)
+                      return
+                    }
+
+                    if (isSavedClip) {
+                      await supabase
+                        .from('user_saved_clips')
+                        .delete()
+                        .eq('user_id', user.id)
+                        .eq('clip_id', clipId)
+                      setIsSavedClip(false)
+                    } else {
+                      await supabase.from('user_saved_clips').insert({
+                        user_id: user.id,
+                        clip_id: clipId,
+                      })
+                      setIsSavedClip(true)
+                    }
+                    setIsLoadingSaved(false)
+                  }}
+                  disabled={isLoadingSaved || !activeSavedClipId}
+                  className={`lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-lg border transition disabled:opacity-50 ${
+                    isSavedClip
+                      ? 'border-bjj-gold/40 bg-bjj-gold/16 text-bjj-gold'
+                      : 'border-white/10 bg-white/[0.05] text-white/80 hover:bg-white/[0.1] hover:text-white'
+                  }`}
+                  title={isSavedClip ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen'}
+                >
+                  <Bookmark className={`h-5 w-5 ${isSavedClip ? 'fill-current' : ''}`} />
                 </button>
               </div>
             )}
