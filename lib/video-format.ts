@@ -78,6 +78,87 @@ export function extractYoutubeId(url?: string | null) {
   return null
 }
 
+export function parseTimestampToSeconds(value?: string | null) {
+  if (!value) return null
+
+  const normalized = decodeURIComponent(value)
+    .trim()
+    .replace(/^#/, '')
+    .replace(/^(?:t|start)=/i, '')
+
+  if (!normalized) return null
+
+  if (/^\d+$/.test(normalized)) {
+    return Number(normalized)
+  }
+
+  const colonParts = normalized.split(':').map((part) => Number(part))
+  if (colonParts.length > 1 && colonParts.every((part) => Number.isFinite(part))) {
+    return colonParts.reduce((total, part) => total * 60 + part, 0)
+  }
+
+  let seconds = 0
+  let matched = false
+  const pattern = /(\d+(?:\.\d+)?)(h|m|s)/gi
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(normalized))) {
+    const amount = Number(match[1])
+    if (!Number.isFinite(amount)) continue
+
+    matched = true
+    if (match[2].toLowerCase() === 'h') seconds += amount * 3600
+    if (match[2].toLowerCase() === 'm') seconds += amount * 60
+    if (match[2].toLowerCase() === 's') seconds += amount
+  }
+
+  return matched ? Math.floor(seconds) : null
+}
+
+export function extractVideoStartSeconds(url?: string | null) {
+  if (!url) return null
+
+  try {
+    const parsed = new URL(url)
+    const queryStart = parseTimestampToSeconds(parsed.searchParams.get('start') ?? parsed.searchParams.get('t'))
+    if (queryStart !== null) return queryStart
+
+    if (parsed.hash) {
+      const hashStart = parseTimestampToSeconds(parsed.hash)
+      if (hashStart !== null) return hashStart
+
+      const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''))
+      const hashParamStart = parseTimestampToSeconds(hashParams.get('start') ?? hashParams.get('t'))
+      if (hashParamStart !== null) return hashParamStart
+    }
+  } catch {
+    const match = url.match(/[?&#](?:t|start)=([^&#]+)/i)
+    const fallbackStart = parseTimestampToSeconds(match?.[1])
+    if (fallbackStart !== null) return fallbackStart
+  }
+
+  return null
+}
+
+export function appendStartSecondsToVideoUrl(url: string | null | undefined, timestampSeconds: number | null | undefined) {
+  if (!url || timestampSeconds === null || timestampSeconds === undefined || timestampSeconds <= 0) return url ?? ''
+  if (extractVideoStartSeconds(url) !== null) return url
+
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+
+    if (host.includes('youtube.com') || host.includes('youtu.be')) {
+      parsed.searchParams.set('t', `${Math.floor(timestampSeconds)}s`)
+      return parsed.toString()
+    }
+  } catch {
+    return `${url}${url.includes('?') ? '&' : '?'}t=${Math.floor(timestampSeconds)}s`
+  }
+
+  return url
+}
+
 export function extractInstagramEmbedUrl(url?: string | null) {
   if (!url) return null
 
@@ -85,4 +166,12 @@ export function extractInstagramEmbedUrl(url?: string | null) {
   if (!match) return null
 
   return `https://www.instagram.com/${match[1]}/${match[2]}/embed`
+}
+
+export function extractInstagramPostId(url?: string | null): string | null {
+  if (!url) return null
+
+  // Match both /reel/ and /p/ (post) URLs
+  const match = url.match(/instagram\.com\/(?:reel|p)\/([^/?#]+)/)
+  return match?.[1] ?? null
 }

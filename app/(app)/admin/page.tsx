@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Bot, ClipboardCheck, Map, Shield, Users, UserCircle } from 'lucide-react'
+import { Bot, ClipboardCheck, Film, Map, RotateCcw, Shield, UploadCloud, Users, UserCircle } from 'lucide-react'
 
 const adminAreas = [
   {
@@ -50,6 +50,24 @@ const adminAreas = [
     borderColor: 'border-purple-500/30',
   },
   {
+    id: 'clips',
+    label: 'Clip-Verwaltung',
+    description: 'Alle Clips mit Filter, Sortierung und Taxonomie-Bearbeitung',
+    icon: Film,
+    href: '/admin/clips',
+    color: 'from-cyan-500/20 to-cyan-600/10',
+    borderColor: 'border-cyan-500/30',
+  },
+  {
+    id: 'video-upload',
+    label: 'Video hochladen',
+    description: 'Manuelle Clips per URL ins Archiv legen',
+    icon: UploadCloud,
+    href: '/admin/video-upload',
+    color: 'from-orange-500/20 to-orange-600/10',
+    borderColor: 'border-orange-500/30',
+  },
+  {
     id: 'techniques',
     label: 'Techniken',
     description: 'Neue Techniken zur Bibliothek hinzufügen',
@@ -57,6 +75,15 @@ const adminAreas = [
     href: '/admin/techniques',
     color: 'from-emerald-500/20 to-emerald-600/10',
     borderColor: 'border-emerald-500/30',
+  },
+  {
+    id: 'progress-reset',
+    label: 'Progress Reset',
+    description: 'Video- und Gameplan-Fortschritt fuer Tests zuruecksetzen',
+    icon: RotateCcw,
+    href: '/admin/progress-reset',
+    color: 'from-red-500/20 to-red-600/10',
+    borderColor: 'border-red-500/30',
   },
 ]
 

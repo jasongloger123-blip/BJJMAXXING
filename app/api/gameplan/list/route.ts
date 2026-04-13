@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getFallbackGameplan, toResolvedGameplan, type GameplanProgressRow, type GameplanSourceNodeMeta } from '@/lib/gameplans'
+import { getNodeById } from '@/lib/nodes'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import { getTechniqueCatalogEntryForPlanNode } from '@/lib/technique-catalog'
+
+export const dynamic = 'force-dynamic'
 
 const PLAN_SELECT = `
   id,
@@ -105,28 +109,63 @@ async function getPublishedPlansByAssignment(
 
 async function getSourceNodeMeta(
   admin: NonNullable<ReturnType<typeof createAdminClient>>,
-  planRecord: any | null
+  planRecord: any | null,
+  userId?: string | null
 ) {
-  const sourceNodeIds = Array.from(
-    new Set(
-      [...(planRecord?.gameplan_nodes ?? [])]
-        .map((node: any) => node.source_node_id)
-        .filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
-    )
-  )
+  const planNodes = [...(planRecord?.gameplan_nodes ?? [])]
+  const sourceNodeIdByLookupId = new Map<string, string>()
+  const sourceNodeIdByTitle = new Map<string, string>()
+  const planNodeBySourceNodeId = new Map<string, any>()
+  planNodes.forEach((node: any) => {
+    const canonicalId = typeof node.source_node_id === 'string' && node.source_node_id.length > 0 ? node.source_node_id : node.id
+    planNodeBySourceNodeId.set(canonicalId, node)
+    ;[canonicalId, node.id].forEach((candidateId) => {
+      if (typeof candidateId === 'string' && candidateId.length > 0) {
+        sourceNodeIdByLookupId.set(candidateId, canonicalId)
+      }
+    })
+    if (typeof node.title === 'string' && node.title.trim()) {
+      sourceNodeIdByTitle.set(node.title.trim().toLowerCase(), canonicalId)
+    }
+  })
 
-  if (sourceNodeIds.length === 0) {
+  const planNodeTitles = Array.from(new Set(planNodes.map((node: any) => (typeof node.title === 'string' ? node.title.trim() : '')).filter(Boolean)))
+  if (planNodeTitles.length > 0) {
+    const { data: titleMatchedNodes } = await admin.from('nodes').select('id, title').in('title', planNodeTitles)
+    ;(titleMatchedNodes ?? []).forEach((node: any) => {
+      const canonicalId = sourceNodeIdByTitle.get((node.title ?? '').trim().toLowerCase())
+      if (canonicalId && typeof node.id === 'string') {
+        sourceNodeIdByLookupId.set(node.id, canonicalId)
+      }
+    })
+
+    const { data: titleMatchedPlanNodes } = await admin.from('gameplan_nodes').select('id, source_node_id, title').in('title', planNodeTitles)
+    ;(titleMatchedPlanNodes ?? []).forEach((node: any) => {
+      const canonicalId = sourceNodeIdByTitle.get((node.title ?? '').trim().toLowerCase())
+      if (!canonicalId) return
+      ;[node.id, node.source_node_id].forEach((candidateId) => {
+        if (typeof candidateId === 'string' && candidateId.length > 0) {
+          sourceNodeIdByLookupId.set(candidateId, canonicalId)
+        }
+      })
+    })
+  }
+
+  const lookupNodeIds = Array.from(sourceNodeIdByLookupId.keys())
+  const sourceNodeIds = Array.from(new Set(sourceNodeIdByLookupId.values()))
+
+  if (lookupNodeIds.length === 0) {
     return {}
   }
 
   const { data, error } = await admin
     .from('nodes')
     .select('id, title, completion_rules')
-    .in('id', sourceNodeIds)
+    .in('id', lookupNodeIds)
 
   if (error) throw new Error(error.message)
 
-  return Object.fromEntries(
+  const metaById = Object.fromEntries(
     (data ?? []).map((node: any) => [
       node.id,
       {
@@ -137,9 +176,158 @@ async function getSourceNodeMeta(
               .map((rule: any) => (typeof rule?.id === 'string' ? rule.id : null))
               .filter((ruleId: string | null): ruleId is string => Boolean(ruleId))
           : [],
+        clipTotal: 0,
+        knownClipCount: 0,
       } satisfies GameplanSourceNodeMeta,
     ])
   )
+
+  sourceNodeIds.forEach((sourceNodeId) => {
+    metaById[sourceNodeId] ??= { id: sourceNodeId, title: null, completionRuleIds: [], clipTotal: 0, knownClipCount: 0 }
+  })
+
+  const { data: assignments } = await admin
+    .from('clip_assignments')
+    .select('node_id, clip_id, display_order, created_at')
+    .eq('assignment_kind', 'node')
+    .in('node_id', lookupNodeIds)
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  const clipIds = Array.from(new Set((assignments ?? []).map((assignment: any) => assignment.clip_id).filter(Boolean)))
+  const visibleClipIds =
+    clipIds.length > 0
+      ? new Set(
+          (
+            (
+              await admin
+                .from('clip_archive')
+                .select('id, assignment_status')
+                .in('id', clipIds)
+                .neq('assignment_status', 'hidden')
+                .neq('assignment_status', 'archived')
+            ).data ?? []
+          ).map((clip: any) => clip.id)
+        )
+      : new Set<string>()
+
+  const clipRefsBySourceNodeId = new Map<string, { keys: string[]; clipId: string | null }[]>()
+  ;(assignments ?? []).forEach((assignment: any) => {
+    if (!visibleClipIds.has(assignment.clip_id)) return
+    const nodeId = sourceNodeIdByLookupId.get(assignment.node_id) ?? assignment.node_id
+    const refs = clipRefsBySourceNodeId.get(nodeId) ?? []
+    if (refs.some((ref) => ref.clipId === assignment.clip_id)) return
+    const index = refs.length
+    refs.push({
+      keys: [`${nodeId}-video-${index}`, `${assignment.node_id}-video-${index}`],
+      clipId: assignment.clip_id,
+    })
+    clipRefsBySourceNodeId.set(nodeId, refs)
+  })
+
+  sourceNodeIds.forEach((sourceNodeId) => {
+    if (clipRefsBySourceNodeId.has(sourceNodeId)) return
+
+    const planNode = planNodeBySourceNodeId.get(sourceNodeId)
+    const catalogEntry = getTechniqueCatalogEntryForPlanNode(planNode)
+    const fallbackNode = getNodeById(sourceNodeId)
+    const videos = catalogEntry?.videos ?? fallbackNode?.videos ?? []
+    const seenUrls = new Set<string>()
+    const fallbackRefs = videos
+      .filter((video: any) => {
+        const url = video.url
+        if (!url || seenUrls.has(url)) return false
+        seenUrls.add(url)
+        return true
+      })
+      .map((_, index) => ({ keys: [`${sourceNodeId}-video-${index}`], clipId: null }))
+
+    if (fallbackRefs.length > 0) {
+      clipRefsBySourceNodeId.set(sourceNodeId, fallbackRefs)
+    }
+  })
+
+  const knownClipKeysByNodeId = new Map<string, Set<string>>()
+  const knownClipIdsByNodeId = new Map<string, Set<string>>()
+  const statusClipKeysByNodeId = new Map<string, Set<string>>()
+  const statusClipIdsByNodeId = new Map<string, Set<string>>()
+  if (userId && sourceNodeIds.length > 0) {
+    const { data: events } = await admin
+      .from('training_clip_events')
+      .select('node_id, clip_key')
+      .eq('user_id', userId)
+      .eq('result', 'known')
+      .in('node_id', lookupNodeIds)
+
+    ;(events ?? []).forEach((event: any) => {
+      const nodeId = sourceNodeIdByLookupId.get(event.node_id) ?? event.node_id
+      const keys = knownClipKeysByNodeId.get(nodeId) ?? new Set<string>()
+      keys.add(event.clip_key)
+      knownClipKeysByNodeId.set(nodeId, keys)
+    })
+
+    const { data: statuses, error: statusError } = await admin
+      .from('training_clip_status')
+      .select('node_id, clip_key, clip_id, can_count, cannot_count, last_result')
+      .eq('user_id', userId)
+      .in('node_id', lookupNodeIds)
+
+    if (!statusError) {
+      ;(statuses ?? []).forEach((status: any) => {
+        const wasSeen =
+          status.last_result === 'known' ||
+          status.last_result === 'not_yet' ||
+          (status.can_count ?? 0) > 0 ||
+          (status.cannot_count ?? 0) > 0
+        if (!wasSeen) return
+
+        const nodeId = sourceNodeIdByLookupId.get(status.node_id) ?? status.node_id
+        const statusKeys = statusClipKeysByNodeId.get(nodeId) ?? new Set<string>()
+        if (typeof status.clip_key === 'string') statusKeys.add(status.clip_key)
+        statusClipKeysByNodeId.set(nodeId, statusKeys)
+
+        if (typeof status.clip_id === 'string' && status.clip_id.length > 0) {
+          const statusClipIds = statusClipIdsByNodeId.get(nodeId) ?? new Set<string>()
+          statusClipIds.add(status.clip_id)
+          statusClipIdsByNodeId.set(nodeId, statusClipIds)
+        }
+
+        if (status.last_result !== 'known' && (status.can_count ?? 0) <= 0) {
+          if (typeof status.clip_key === 'string') knownClipKeysByNodeId.get(nodeId)?.delete(status.clip_key)
+          if (typeof status.clip_id === 'string' && status.clip_id.length > 0) knownClipIdsByNodeId.get(nodeId)?.delete(status.clip_id)
+          return
+        }
+
+        const keys = knownClipKeysByNodeId.get(nodeId) ?? new Set<string>()
+        if (typeof status.clip_key === 'string') keys.add(status.clip_key)
+        knownClipKeysByNodeId.set(nodeId, keys)
+
+        if (typeof status.clip_id === 'string' && status.clip_id.length > 0) {
+          const clipIds = knownClipIdsByNodeId.get(nodeId) ?? new Set<string>()
+          clipIds.add(status.clip_id)
+          knownClipIdsByNodeId.set(nodeId, clipIds)
+        }
+      })
+    }
+  }
+
+  clipRefsBySourceNodeId.forEach((clipRefs, nodeId) => {
+    const knownKeys = knownClipKeysByNodeId.get(nodeId) ?? new Set<string>()
+    const knownClipIds = knownClipIdsByNodeId.get(nodeId) ?? new Set<string>()
+    const statusKeys = statusClipKeysByNodeId.get(nodeId) ?? new Set<string>()
+    const statusClipIds = statusClipIdsByNodeId.get(nodeId) ?? new Set<string>()
+    metaById[nodeId] = {
+      ...metaById[nodeId],
+      clipTotal: clipRefs.length,
+      knownClipCount: clipRefs.filter((clipRef) => {
+        const hasKnown = clipRef.keys.some((clipKey) => knownKeys.has(clipKey)) || (clipRef.clipId ? knownClipIds.has(clipRef.clipId) : false)
+        const hasAnyStatus = clipRef.keys.some((clipKey) => statusKeys.has(clipKey)) || (clipRef.clipId ? statusClipIds.has(clipRef.clipId) : false)
+        return hasKnown && (hasAnyStatus || clipRef.keys.some((clipKey) => knownKeys.has(clipKey)))
+      }).length,
+    }
+  })
+
+  return metaById
 }
 
 export async function GET(request: Request) {
@@ -160,12 +348,16 @@ export async function GET(request: Request) {
     // Get user profile
     const { data: profile } = await admin
       .from('user_profiles')
-      .select('id, primary_archetype')
+      .select('id, primary_archetype, disabled_gameplan_ids, active_gameplan_id')
       .eq('id', user.id)
       .maybeSingle()
 
     const profileId = profile?.id
     const archetypeId = profile?.primary_archetype
+    const disabledPlanIds = Array.isArray(profile?.disabled_gameplan_ids)
+      ? profile.disabled_gameplan_ids.filter((value): value is string => typeof value === 'string' && value.length > 0)
+      : []
+    const activePlanId = typeof profile?.active_gameplan_id === 'string' ? profile.active_gameplan_id : null
 
     const { data: progress } = await admin
       .from('progress')
@@ -223,7 +415,7 @@ export async function GET(request: Request) {
     // Resolve all plans
     const resolvedPlans = await Promise.all(
       plans.map(async (planRecord) => {
-        const sourceMeta = await getSourceNodeMeta(admin, planRecord)
+        const sourceMeta = await getSourceNodeMeta(admin, planRecord, user.id)
         return toResolvedGameplan(planRecord, progressRows, 'assignment', sourceMeta)
       })
     )
@@ -232,12 +424,16 @@ export async function GET(request: Request) {
       return NextResponse.json({
         plans: [getFallbackGameplan(archetypeId)],
         count: 1,
+        disabledPlanIds,
+        activePlanId,
       })
     }
 
     return NextResponse.json({ 
       plans: resolvedPlans.filter(Boolean),
-      count: resolvedPlans.length 
+      count: resolvedPlans.length,
+      disabledPlanIds,
+      activePlanId,
     })
   } catch (error) {
     console.error('Error fetching user gameplans:', error)

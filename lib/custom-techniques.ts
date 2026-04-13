@@ -1,18 +1,33 @@
 import type { StageKey } from '@/lib/gameplans'
+import { normalizeHashtags } from '@/lib/external-technique-sources'
 import {
   coverageIncludesStyle,
   normalizeTechniqueStyleCoverage,
   type TechniqueStyle,
   type TechniqueStyleCoverage,
 } from '@/lib/technique-style'
+import { normalizeClipContentType, normalizeClipLearningPhase, type ClipContentType, type ClipLearningPhase } from '@/lib/clip-taxonomy'
 
 export type TechniqueVideo = {
   id: string
   title: string
   url: string
   platform: 'youtube' | 'instagram' | 'other'
+  videoType: TechniqueVideoType
+  contentType?: ClipContentType
+  learningPhase?: ClipLearningPhase
+  targetArchetypeIds?: string[]
   description?: string
+  hashtags?: string[]
   timestamp?: string
+}
+
+export type TechniqueVideoType = 'youtube' | 'youtube_short' | 'instagram_reel' | 'tiktok'
+
+export type TechniqueTaggedNote = {
+  id: string
+  text: string
+  styleCoverage: TechniqueStyleCoverage
 }
 
 export type TechniqueCounter = {
@@ -37,8 +52,8 @@ export type TechniqueStyleContent = {
   videos?: TechniqueVideo[]
   counters?: TechniqueCounter[]
   drills?: TechniqueDrill[]
-  keyPoints?: string[]
-  commonErrors?: string[]
+  keyPoints?: TechniqueTaggedNote[]
+  commonErrors?: TechniqueTaggedNote[]
 }
 
 export type TechniqueStyleOverrides = Partial<Record<TechniqueStyle, TechniqueStyleContent>>
@@ -58,8 +73,8 @@ export type CustomTechniqueRecord = {
   videos: TechniqueVideo[]
   counters: TechniqueCounter[]
   drills: TechniqueDrill[]
-  keyPoints: string[]
-  commonErrors: string[]
+  keyPoints: TechniqueTaggedNote[]
+  commonErrors: TechniqueTaggedNote[]
   prerequisites: string[]
   recommendedArchetypeIds: string[]
   styleCoverage: TechniqueStyleCoverage
@@ -70,6 +85,102 @@ export type CustomTechniqueRecord = {
 
 export const CUSTOM_TECHNIQUES_STORAGE_KEY = 'bjj-custom-techniques-v2'
 export const CUSTOM_TECHNIQUES_EVENT = 'custom-techniques-changed'
+
+export function normalizeTechniqueVideoType(value: unknown): TechniqueVideoType {
+  if (value === 'youtube' || value === 'youtube_short' || value === 'instagram_reel' || value === 'tiktok') {
+    return value
+  }
+
+  return 'youtube'
+}
+
+export function inferTechniqueVideoType(url?: string, platform?: TechniqueVideo['platform']): TechniqueVideoType {
+  const safeUrl = (url ?? '').toLowerCase()
+
+  if (safeUrl.includes('tiktok.com')) return 'tiktok'
+  if (safeUrl.includes('instagram.com')) return 'instagram_reel'
+  if (safeUrl.includes('/shorts/')) return 'youtube_short'
+  if (safeUrl.includes('youtube.com') || safeUrl.includes('youtu.be')) return 'youtube'
+  if (platform === 'instagram') return 'instagram_reel'
+  return 'youtube'
+}
+
+export function getTechniqueVideoTypeLabel(videoType: TechniqueVideoType) {
+  if (videoType === 'youtube_short') return 'YouTube Short'
+  if (videoType === 'instagram_reel') return 'Instagram Reel'
+  if (videoType === 'tiktok') return 'TikTok'
+  return 'YouTube-Video'
+}
+
+export function getTechniqueVideoOrientation(videoType: TechniqueVideoType) {
+  return videoType === 'youtube' ? 'landscape' : 'portrait'
+}
+
+export function getTechniqueVideoOrientationLabel(videoType: TechniqueVideoType) {
+  return getTechniqueVideoOrientation(videoType) === 'portrait' ? 'Hochformat' : 'Querformat'
+}
+
+export function getTechniqueNoteText(note: string | TechniqueTaggedNote) {
+  return typeof note === 'string' ? note : note.text
+}
+
+function normalizeTechniqueTaggedNote(value: unknown): TechniqueTaggedNote | null {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text) return null
+    return {
+      id: `note-${crypto.randomUUID().slice(0, 8)}`,
+      text,
+      styleCoverage: 'both',
+    }
+  }
+
+  if (!value || typeof value !== 'object') return null
+
+  const entry = value as Partial<TechniqueTaggedNote> & { label?: string }
+  const text = typeof entry.text === 'string' ? entry.text.trim() : typeof entry.label === 'string' ? entry.label.trim() : ''
+  if (!text) return null
+
+  return {
+    id: typeof entry.id === 'string' && entry.id.trim() ? entry.id : `note-${crypto.randomUUID().slice(0, 8)}`,
+    text,
+    styleCoverage: normalizeTechniqueStyleCoverage(entry.styleCoverage),
+  }
+}
+
+function normalizeTechniqueVideo(value: unknown): TechniqueVideo | null {
+  if (!value || typeof value !== 'object') return null
+
+  const entry = value as Partial<TechniqueVideo>
+  if (typeof entry.id !== 'string' || typeof entry.title !== 'string' || typeof entry.url !== 'string') {
+    return null
+  }
+
+  const platform: TechniqueVideo['platform'] =
+    entry.platform === 'youtube' || entry.platform === 'instagram' || entry.platform === 'other'
+      ? entry.platform
+      : entry.url.includes('instagram.com')
+        ? 'instagram'
+        : entry.url.includes('youtube.com') || entry.url.includes('youtu.be')
+          ? 'youtube'
+          : 'other'
+
+  return {
+    id: entry.id,
+    title: entry.title,
+    url: entry.url,
+    platform,
+    videoType: normalizeTechniqueVideoType(entry.videoType ?? inferTechniqueVideoType(entry.url, platform)),
+    contentType: normalizeClipContentType(entry.contentType),
+    learningPhase: normalizeClipLearningPhase(entry.learningPhase),
+    targetArchetypeIds: Array.isArray(entry.targetArchetypeIds)
+      ? entry.targetArchetypeIds.filter((item): item is string => typeof item === 'string')
+      : [],
+    description: typeof entry.description === 'string' && entry.description.trim() ? entry.description : undefined,
+    hashtags: normalizeHashtags(Array.isArray(entry.hashtags) ? entry.hashtags : []),
+    timestamp: typeof entry.timestamp === 'string' && entry.timestamp.trim() ? entry.timestamp : undefined,
+  }
+}
 
 export function readCustomTechniques(): CustomTechniqueRecord[] {
   if (typeof window === 'undefined') return []
@@ -175,11 +286,11 @@ function normalizeTechniqueStyleContent(value: unknown): TechniqueStyleContent |
   const next: TechniqueStyleContent = {}
 
   if (typeof entry.description === 'string' && entry.description.trim()) next.description = entry.description
-  if (Array.isArray(entry.videos)) next.videos = entry.videos
+  if (Array.isArray(entry.videos)) next.videos = entry.videos.map((item) => normalizeTechniqueVideo(item)).filter((item): item is TechniqueVideo => Boolean(item))
   if (Array.isArray(entry.counters)) next.counters = entry.counters
   if (Array.isArray(entry.drills)) next.drills = entry.drills
-  if (Array.isArray(entry.keyPoints)) next.keyPoints = entry.keyPoints.filter((item): item is string => typeof item === 'string')
-  if (Array.isArray(entry.commonErrors)) next.commonErrors = entry.commonErrors.filter((item): item is string => typeof item === 'string')
+  if (Array.isArray(entry.keyPoints)) next.keyPoints = entry.keyPoints.map((item) => normalizeTechniqueTaggedNote(item)).filter((item): item is TechniqueTaggedNote => Boolean(item))
+  if (Array.isArray(entry.commonErrors)) next.commonErrors = entry.commonErrors.map((item) => normalizeTechniqueTaggedNote(item)).filter((item): item is TechniqueTaggedNote => Boolean(item))
 
   return Object.keys(next).length > 0 ? next : undefined
 }
@@ -247,15 +358,21 @@ function normalizeCustomTechniqueRecord(entry: unknown): CustomTechniqueRecord |
     creator: typeof record.creator === 'string' ? record.creator : 'BJJMAXXING',
     fighter: typeof record.fighter === 'string' ? record.fighter : 'BJJMAXXING',
     level: typeof record.level === 'number' ? record.level : 1,
-    videos: Array.isArray(record.videos) ? record.videos : [],
+    videos: Array.isArray(record.videos)
+      ? record.videos.map((item) => normalizeTechniqueVideo(item)).filter((item): item is TechniqueVideo => Boolean(item))
+      : [],
     counters: Array.isArray(record.counters)
       ? record.counters.map((item) => normalizeTechniqueCounter(item)).filter((item): item is TechniqueCounter => Boolean(item))
       : [],
     drills: Array.isArray(record.drills)
       ? record.drills.map((item) => normalizeTechniqueDrill(item)).filter((item): item is TechniqueDrill => Boolean(item))
       : [],
-    keyPoints: Array.isArray(record.keyPoints) ? record.keyPoints.filter((item): item is string => typeof item === 'string') : [],
-    commonErrors: Array.isArray(record.commonErrors) ? record.commonErrors.filter((item): item is string => typeof item === 'string') : [],
+    keyPoints: Array.isArray(record.keyPoints)
+      ? record.keyPoints.map((item) => normalizeTechniqueTaggedNote(item)).filter((item): item is TechniqueTaggedNote => Boolean(item))
+      : [],
+    commonErrors: Array.isArray(record.commonErrors)
+      ? record.commonErrors.map((item) => normalizeTechniqueTaggedNote(item)).filter((item): item is TechniqueTaggedNote => Boolean(item))
+      : [],
     prerequisites: Array.isArray(record.prerequisites) ? record.prerequisites.filter((item): item is string => typeof item === 'string') : [],
     recommendedArchetypeIds: Array.isArray(record.recommendedArchetypeIds)
       ? record.recommendedArchetypeIds.filter((item): item is string => typeof item === 'string')

@@ -17,3 +17,11 @@ export function isAdminEmail(email?: string | null) {
 
   return getAdminEmails().includes(email.toLowerCase())
 }
+
+export function hasAdminAccess(identity?: { email?: string | null; profileEmail?: string | null }) {
+  if (!identity) {
+    return false
+  }
+
+  return isAdminEmail(identity.email) || isAdminEmail(identity.profileEmail)
+}

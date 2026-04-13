@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { isAdminEmail } from '@/lib/admin-access'
+import { normalizeClipContentType, normalizeClipLearningPhase } from '@/lib/clip-taxonomy'
 
 async function resolveAdmin(request: Request) {
   const supabase = createClient()
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await admin
     .from('clip_assignments')
-    .select('id, clip_id, assignment_kind, node_id, from_node_id, to_node_id, role, display_order, notes, created_at')
+    .select('id, clip_id, assignment_kind, node_id, from_node_id, to_node_id, role, display_order, content_type, learning_phase, target_archetype_ids, notes, created_at')
     .eq('clip_id', clipId)
     .order('display_order', { ascending: true })
     .order('created_at', { ascending: true })
@@ -95,6 +96,9 @@ export async function POST(request: Request) {
     toNodeId?: string
     role?: 'main_reference' | 'counter_reference' | 'drill_reference' | 'related_reference'
     displayOrder?: number
+    contentType?: string | null
+    learningPhase?: string | null
+    targetArchetypeIds?: string[] | null
     notes?: string | null
   }
 
@@ -134,6 +138,11 @@ export async function POST(request: Request) {
       to_node_id: body.assignmentKind === 'connection' ? body.toNodeId ?? null : null,
       role: body.assignmentKind === 'node' ? body.role ?? 'main_reference' : null,
       display_order: body.displayOrder ?? 0,
+      content_type: body.assignmentKind === 'node' ? normalizeClipContentType(body.contentType) : null,
+      learning_phase: body.assignmentKind === 'node' ? normalizeClipLearningPhase(body.learningPhase) : null,
+      target_archetype_ids: Array.isArray(body.targetArchetypeIds)
+        ? body.targetArchetypeIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+        : [],
       notes: body.notes?.trim() || null,
     },
     {
@@ -146,7 +155,93 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  if (body.assignmentKind === 'node') {
+    await admin
+      .from('clip_archive')
+      .update({
+        content_type: normalizeClipContentType(body.contentType),
+        learning_phase: normalizeClipLearningPhase(body.learningPhase),
+        target_archetype_ids: Array.isArray(body.targetArchetypeIds)
+          ? body.targetArchetypeIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+          : [],
+        last_seen_at: new Date().toISOString(),
+      })
+      .eq('id', clipId)
+  }
+
   await refreshClipStatus(admin, clipId)
+  
+  // Fetch the created assignment to return its ID
+  const { data: assignmentData } = await admin
+    .from('clip_assignments')
+    .select('id, role')
+    .eq('clip_id', clipId)
+    .eq('assignment_kind', body.assignmentKind)
+    .eq('node_id', body.assignmentKind === 'node' ? body.nodeId : null)
+    .single()
+  
+  return NextResponse.json({ ok: true, assignmentId: assignmentData?.id, role: assignmentData?.role })
+}
+
+export async function PATCH(request: Request) {
+  const { user, admin } = await resolveAdmin(request)
+
+  if (!user || !isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Kein Admin-Zugriff.' }, { status: 403 })
+  }
+
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin-Client nicht konfiguriert.' }, { status: 500 })
+  }
+
+  const body = (await request.json()) as {
+    assignmentId?: string
+    clipId?: string
+    role?: 'main_reference' | 'counter_reference' | 'drill_reference' | 'related_reference'
+    contentType?: string | null
+    learningPhase?: string | null
+    targetArchetypeIds?: string[] | null
+    notes?: string | null
+  }
+
+  if (!body.assignmentId || !body.clipId || !body.role) {
+    return NextResponse.json({ error: 'assignmentId, clipId oder role fehlt.' }, { status: 400 })
+  }
+
+  const targetArchetypeIds = Array.isArray(body.targetArchetypeIds)
+    ? body.targetArchetypeIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : []
+  const contentType = normalizeClipContentType(body.contentType)
+  const learningPhase = normalizeClipLearningPhase(body.learningPhase)
+
+  const { error } = await admin
+    .from('clip_assignments')
+    .update({
+      role: body.role,
+      content_type: contentType,
+      learning_phase: learningPhase,
+      target_archetype_ids: targetArchetypeIds,
+      ...(typeof body.notes === 'string' ? { notes: body.notes.trim() || null } : {}),
+    })
+    .eq('id', body.assignmentId)
+    .eq('clip_id', body.clipId)
+    .eq('assignment_kind', 'node')
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  await admin
+    .from('clip_archive')
+    .update({
+      content_type: contentType,
+      learning_phase: learningPhase,
+      target_archetype_ids: targetArchetypeIds,
+      last_seen_at: new Date().toISOString(),
+    })
+    .eq('id', body.clipId)
+
+  await refreshClipStatus(admin, body.clipId)
   return NextResponse.json({ ok: true })
 }
 

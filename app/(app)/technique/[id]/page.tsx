@@ -18,6 +18,10 @@ import {
 import { GameplanClipDeck } from '@/components/gameplan/GameplanClipDeck'
 import { TechniqueStyleToggle } from '@/components/technique-library/TechniqueStyleToggle'
 import { clipArchiveToCuratedClip, type ClipArchiveRecord } from '@/lib/clip-archive'
+import {
+  getTechniqueVideoOrientationLabel,
+  getTechniqueVideoTypeLabel,
+} from '@/lib/custom-techniques'
 import type { CuratedClip } from '@/lib/curated-clips'
 import type { ResolvedGameplan } from '@/lib/gameplans'
 import { getTechniqueCatalogEntryById, getTechniqueFollowUpsFromPlan, resolveTechniqueCatalogContent } from '@/lib/technique-catalog'
@@ -205,7 +209,9 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
   const heroEmbedUrl = buildYoutubeEmbedUrl(heroVideoUrl)
   const heroThumbnail = getYoutubeThumbnail(heroVideoUrl) ?? technique.image ?? null
   const difficulty = getDifficulty(technique.level)
-  const detailObjectives = (resolvedContent.keyPoints.length > 0 ? resolvedContent.keyPoints : [technique.subtitle]).slice(0, 3)
+  const detailObjectives = (resolvedContent.keyPoints.length > 0
+    ? resolvedContent.keyPoints
+    : [{ id: `${params.id}-fallback-keypoint`, text: technique.subtitle, styleCoverage: 'both' as const }]).slice(0, 3)
   const followUps = useMemo(() => getTechniqueFollowUpsFromPlan(params.id, activePlan), [activePlan, params.id])
 
   const localDetailClips = useMemo<CuratedClip[]>(
@@ -215,7 +221,7 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
         nodeId: params.id,
         title: video.title,
         clipWindow: index === 0 ? '0:00-0:30' : '0:12-0:42',
-        principle: resolvedContent.keyPoints[index] ?? technique.subtitle ?? resolvedContent.description,
+        principle: resolvedContent.keyPoints[index]?.text ?? technique.subtitle ?? resolvedContent.description,
         category: getStageLabel(technique.stage),
         levelLabel: getDifficultyLabel(technique.level),
         description: resolvedContent.description,
@@ -239,6 +245,7 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
       url: video.url,
       creator: video.platform,
       thumbnail: getYoutubeThumbnail(video.url),
+      videoType: video.videoType,
     })),
     ...linkedClips.main_reference
       .filter((clip) => Boolean(clip.video_url))
@@ -248,6 +255,7 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
         url: clip.video_url ?? clip.source_url,
         creator: clip.video_platform ?? clip.provider,
         thumbnail: getYoutubeThumbnail(clip.video_url ?? clip.source_url),
+        videoType: undefined,
       })),
   ]
 
@@ -320,7 +328,9 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
                       <ExternalLink className="h-5 w-5" />
                     </a>
                     <div className="hidden rounded-2xl border border-white/[0.08] bg-white/[0.06] px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/70 md:block">
-                      {heroVideo?.platform ?? fallbackHeroClip?.video_platform ?? 'video'}
+                      {heroVideo
+                        ? `${getTechniqueVideoTypeLabel(heroVideo.videoType)} • ${getTechniqueVideoOrientationLabel(heroVideo.videoType)}`
+                        : fallbackHeroClip?.video_platform ?? 'video'}
                     </div>
                   </div>
                 ) : null}
@@ -423,9 +433,14 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
                   </p>
                   <div className="mt-5 space-y-3">
                     {detailObjectives.map((item, index) => (
-                      <div key={`${item}-${index}`} className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/76">
+                      <div key={`${item.id}-${index}`} className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/76">
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/38">Punkt {index + 1}</p>
-                        <p className="mt-2">{item}</p>
+                        <p className="mt-2">{item.text}</p>
+                        {(item.styleCoverage ?? 'both') !== 'both' ? (
+                          <p className="mt-3 text-[11px] font-black uppercase tracking-[0.18em] text-bjj-gold">
+                            {getTechniqueCoverageLabel(item.styleCoverage ?? 'both')}
+                          </p>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -441,9 +456,14 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
                   {(resolvedContent.commonErrors.length > 0
                     ? resolvedContent.commonErrors
                     : ['Hier kommen spaeter die haeufigsten Fehler dieser Technik rein.']).map((error, index) => (
-                    <div key={`${error}-${index}`} className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/76">
+                    <div key={`${typeof error === 'string' ? error : error.id}-${index}`} className="rounded-[1.2rem] border border-white/[0.05] bg-[#101319] px-4 py-4 text-sm text-white/76">
                       <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/38">Fehler {index + 1}</p>
-                      <p className="mt-2">{error}</p>
+                      <p className="mt-2">{typeof error === 'string' ? error : error.text}</p>
+                      {typeof error !== 'string' && (error.styleCoverage ?? 'both') !== 'both' ? (
+                        <p className="mt-3 text-[11px] font-black uppercase tracking-[0.18em] text-bjj-gold">
+                          {getTechniqueCoverageLabel(error.styleCoverage ?? 'both')}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -478,7 +498,9 @@ export default function CustomTechniquePage({ params }: { params: { id: string }
                         </div>
                         <div className="mt-3 min-w-0">
                           <p className="truncate text-sm font-bold text-white">{video.title}</p>
-                          <p className="mt-1 text-xs text-white/40">{video.creator}</p>
+                          <p className="mt-1 text-xs text-white/40">
+                            {video.videoType ? `${getTechniqueVideoTypeLabel(video.videoType)} • ${getTechniqueVideoOrientationLabel(video.videoType)}` : video.creator}
+                          </p>
                         </div>
                       </a>
                     ))

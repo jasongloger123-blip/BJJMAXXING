@@ -2,10 +2,10 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, Users, MapPin, Award, Sparkles, Shield, Globe2, Link2, Youtube, Instagram, Music2, Facebook, Mail, ArrowRight, Filter, ExternalLink } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { Search, Users, MapPin, Sparkles, Shield, Globe2, Link2, Youtube, Instagram, Music2, Facebook, Mail, ArrowRight, ExternalLink } from 'lucide-react'
 import { ARCHETYPES } from '@/lib/archetypes'
 import { getFlagSvgUrl, getCountryLabel } from '@/lib/countries'
+import { createClient } from '@/lib/supabase/client'
 
 // Types
 type ProfileWithStats = {
@@ -73,128 +73,28 @@ export default function AdminProfilesDashboardPage() {
     setError(null)
 
     try {
-      // First, get all user profiles - try with social columns first, fallback if they don't exist
-      let profileData: any[] | null = null
-      let profileError: any = null
-      
-      try {
-        const result = await supabase
-          .from('user_profiles')
-          .select(`
-            id,
-            username,
-            full_name,
-            email,
-            avatar_url,
-            belt,
-            primary_archetype,
-            nationality,
-            gym_name,
-            gym_unlisted_name,
-            gym_location,
-            social_link,
-            youtube_url,
-            instagram_url,
-            tiktok_url,
-            facebook_url,
-            created_at
-          `)
-          .order('created_at', { ascending: false })
-        
-        if (result.error) {
-          // Try without social columns
-          const fallbackResult = await supabase
-            .from('user_profiles')
-            .select(`
-              id,
-              username,
-              full_name,
-              email,
-              avatar_url,
-              belt,
-              primary_archetype,
-              nationality,
-              gym_name,
-              gym_unlisted_name,
-              gym_location,
-              social_link,
-              created_at
-            `)
-            .order('created_at', { ascending: false })
-          
-          profileData = fallbackResult.data
-          profileError = fallbackResult.error
-          
-          // Add null for missing social columns
-          if (profileData) {
-            profileData = profileData.map((p: any) => ({
-              ...p,
-              youtube_url: null,
-              instagram_url: null,
-              tiktok_url: null,
-              facebook_url: null,
-            }))
-          }
-        } else {
-          profileData = result.data
-        }
-      } catch (err) {
-        profileError = err
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      const response = await fetch('/api/admin/profiles', {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: session?.access_token
+          ? {
+              Authorization: `Bearer ${session.access_token}`,
+            }
+          : {},
+      })
+
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? 'Fehler beim Laden der Profile')
       }
 
-      if (profileError) {
-        throw new Error(profileError.message)
-      }
-
-      // Get auth user data for last sign in
-      const { data: usersData, error: usersError } = await supabase
-        .from('auth.users')
-        .select('id, last_sign_in_at')
-
-      // Get all progress data
-      const { data: progressData } = await supabase
-        .from('progress')
-        .select('user_id, completed, validated')
-
-      // Get training events count
-      const { data: eventsData } = await supabase
-        .from('training_clip_events')
-        .select('user_id')
-
-      // Calculate stats per user
-      const statsMap = new Map<string, { completed: number; validated: number; events: number }>()
-      
-      progressData?.forEach((p) => {
-        const current = statsMap.get(p.user_id) || { completed: 0, validated: 0, events: 0 }
-        if (p.completed) current.completed++
-        if (p.validated) current.validated++
-        statsMap.set(p.user_id, current)
-      })
-
-      eventsData?.forEach((e) => {
-        const current = statsMap.get(e.user_id) || { completed: 0, validated: 0, events: 0 }
-        current.events++
-        statsMap.set(e.user_id, current)
-      })
-
-      // Merge data
-      const lastSignInMap = new Map(usersData?.map((u: any) => [u.id, u.last_sign_in_at]) ?? [])
-
-      const enrichedProfiles: ProfileWithStats[] = (profileData ?? []).map((p: any) => {
-        const stats = statsMap.get(p.id) || { completed: 0, validated: 0, events: 0 }
-        const totalProgress = Math.max(0, stats.completed + stats.validated)
-        
-        return {
-          ...p,
-          last_sign_in_at: lastSignInMap.get(p.id) ?? null,
-          completed_nodes: stats.completed,
-          validated_nodes: stats.validated,
-          total_progress: totalProgress,
-          training_events: stats.events,
-        }
-      })
-
-      setProfiles(enrichedProfiles)
+      setProfiles((payload?.profiles ?? []) as ProfileWithStats[])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Fehler beim Laden der Profile')
     } finally {

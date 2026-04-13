@@ -3,7 +3,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowUpRight, Check, ChevronUp, MapPinned, MessageCircle, Play, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, Bookmark, Check, ChevronUp, Gauge, MapPinned, MessageCircle, RotateCcw, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { ARCHETYPES } from '@/lib/archetypes'
 import type { ResolvedGameplan } from '@/lib/gameplans'
 import { createClient } from '@/lib/supabase/client'
@@ -12,6 +12,9 @@ import { buildStartQueue, type ClipResult, type QueueCard, type QueueEvent } fro
 import { YoutubeEmbed } from '@/components/YoutubeEmbed'
 import { getNodeById } from '@/lib/nodes'
 import { getFlagSvgUrl } from '@/lib/countries'
+import { getTechniqueCatalogEntryForPlanNode } from '@/lib/technique-catalog'
+import { readCustomTechniques } from '@/lib/custom-techniques'
+import { calculateClipProgressForNode, getClipProgressLookupIds } from '@/lib/clip-progress'
 
 type StartState = {
   userId: string
@@ -76,18 +79,9 @@ type ProgressRow = {
   validated?: boolean
 }
 
-type ProgressSnapshot = {
-  watched?: boolean
-  drilled?: boolean
-  attempted?: boolean
-  hit_in_sparring?: boolean
-  completed?: boolean
-  completed_at?: string | null
-  validated?: boolean
-  validated_at?: string | null
-} | null
-
 type QueueTransitionPhase = 'idle' | 'out' | 'prepare'
+
+const GAMEPLAN_UNLOCK_EVENT_KEY = 'bjjmaxxing:pending-gameplan-unlock'
 
 function extractYoutubeId(url: string) {
   const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/)
@@ -101,6 +95,63 @@ function getClipPreviewImage(url: string) {
   }
 
   return null
+}
+
+
+
+type ClipPreview = {
+  id: string
+  title: string
+  url: string
+  thumbnailUrl: string | null
+  usesAssignedClip: boolean
+  videoKey: string
+}
+
+function getVisibleTechniqueVideosForNode(
+  node: { id: string; title: string; label: string; sourceNodeId?: string | null },
+  clipArchiveVideos: Record<string, { id: string; title: string; url: string; thumbnailUrl: string | null; description?: string | null; hashtags?: string[] }[]>
+) {
+  const sourceId = node.sourceNodeId ?? node.id
+  const entry = getTechniqueCatalogEntryForPlanNode(node)
+  const fallbackNode = getNodeById(sourceId)
+  const catalogVideos =
+    entry?.videos?.map((video, index) => ({
+      id: `${node.id}-video-${index}`,
+      title: video.title,
+      url: video.url,
+      thumbnailUrl: getClipPreviewImage(video.url),
+      usesAssignedClip: false,
+      videoKey: `${sourceId}-video-${index}`,
+      description: null,
+      hashtags: [],
+    })) ??
+    fallbackNode?.videos.map((video, index) => ({
+      id: `${node.id}-video-${index}`,
+      title: video.title,
+      url: video.url,
+      thumbnailUrl: getClipPreviewImage(video.url),
+      usesAssignedClip: false,
+      videoKey: `${sourceId}-video-${index}`,
+      description: null,
+      hashtags: [],
+    })) ??
+    []
+
+  const assignedVideos = (clipArchiveVideos[sourceId] ?? []).map((video, index) => ({
+    ...video,
+    usesAssignedClip: true,
+    videoKey: `${sourceId}-video-${index}`,
+  }))
+
+  const selectedVideos = assignedVideos.length > 0 ? assignedVideos : catalogVideos
+  const seenUrls = new Set<string>()
+
+  return selectedVideos.filter((video) => {
+    if (!video.url || seenUrls.has(video.url)) return false
+    seenUrls.add(video.url)
+    return true
+  })
 }
 
 function isMissingColumnError(error: { message?: string } | null, column: string) {
@@ -156,6 +207,83 @@ function isProfileReady(state: StartState | null) {
   return Boolean(state && (state.username ?? state.fullName) && state.primaryArchetype && (state.gymPlaceId ?? state.gymName ?? state.gymUnlistedName))
 }
 
+function shouldReplaceDisplayedCard(displayCard: QueueCard, primaryCard: QueueCard) {
+  return (
+    displayCard.id !== primaryCard.id ||
+    displayCard.nodeId !== primaryCard.nodeId ||
+    displayCard.title !== primaryCard.title ||
+    displayCard.clipTitle !== primaryCard.clipTitle ||
+    displayCard.clipUrl !== primaryCard.clipUrl ||
+    displayCard.badge !== primaryCard.badge ||
+    displayCard.helperText !== primaryCard.helperText
+  )
+}
+
+function mergeQueueCards(serverQueue: QueueCard[] | null, localQueue: QueueCard[]) {
+  if (!serverQueue?.length) {
+    return localQueue
+  }
+
+  if (!localQueue.length) {
+    return serverQueue
+  }
+
+  const serverById = new Map(serverQueue.map((card) => [card.id, card]))
+  return localQueue.map((localCard) => {
+    const serverCard = serverById.get(localCard.id)
+    if (!serverCard) {
+      return localCard
+    }
+
+    return {
+      ...localCard,
+      clipTitle: serverCard.clipTitle || localCard.clipTitle,
+      clipDescription: serverCard.clipDescription ?? localCard.clipDescription,
+      clipHashtags: serverCard.clipHashtags ?? localCard.clipHashtags,
+      clipUrl: serverCard.clipUrl || localCard.clipUrl,
+      clipSource: serverCard.clipUrl ? serverCard.clipSource : localCard.clipSource,
+    }
+  })
+}
+
+function rotateQueueCards(cards: QueueCard[], startIndex: number) {
+  if (!cards.length) return []
+  const activeNodeId = cards[0].nodeId
+  const activeCards = cards.filter((card) => card.nodeId === activeNodeId && card.type === 'main')
+  const restCards = cards.filter((card) => !(card.nodeId === activeNodeId && card.type === 'main'))
+  const targetCard = cards[((startIndex % cards.length) + cards.length) % cards.length]
+  const activeStart = activeCards.findIndex((card) => card.id === targetCard?.id || card.videoKey === targetCard?.videoKey)
+
+  if (activeStart < 0) {
+    return [...activeCards, ...restCards]
+  }
+
+  return [...activeCards.slice(activeStart), ...activeCards.slice(0, activeStart), ...restCards]
+}
+
+function getLatestLocalQueueIndex(cards: QueueCard[], events: QueueEvent[]) {
+  if (!cards.length) return 0
+
+  const cardKeys = new Set(cards.map((card) => card.videoKey))
+  const latestRelevantEvent = events.find((event) => cardKeys.has(event.clip_key))
+  if (!latestRelevantEvent) {
+    return 0
+  }
+
+  const latestIndex = cards.findIndex((card) => card.videoKey === latestRelevantEvent.clip_key)
+  if (latestIndex < 0) {
+    return 0
+  }
+
+  return (latestIndex + 1) % cards.length
+}
+
+function getClipSourceFromUrl(url: string): QueueCard['clipSource'] {
+  if (url.includes('instagram.com')) return 'instagram'
+  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube'
+  return 'external'
+}
+
 export default function StartHome() {
   const router = useRouter()
   const supabase = createClient()
@@ -169,6 +297,9 @@ export default function StartHome() {
   const [completedIds, setCompletedIds] = useState<string[]>([])
   const [validatedIds, setValidatedIds] = useState<string[]>([])
   const [events, setEvents] = useState<QueueEvent[]>([])
+  const [serverQueue, setServerQueue] = useState<QueueCard[] | null>(null)
+  const [clipArchiveVideos, setClipArchiveVideos] = useState<Record<string, { id: string; title: string; url: string; thumbnailUrl: string | null; description?: string | null; hashtags?: string[] }[]>>({})
+  const [clipProgressByNodeId, setClipProgressByNodeId] = useState<Record<string, { completed: number; total: number; percent: number }>>({})
   const [comments, setComments] = useState<ClipComment[]>([])
   const [commentDraft, setCommentDraft] = useState('')
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
@@ -178,6 +309,7 @@ export default function StartHome() {
   const [usernameDraft, setUsernameDraft] = useState('')
   const [commentFeaturesReady, setCommentFeaturesReady] = useState(true)
   const [activePlan, setActivePlan] = useState<ResolvedGameplan | null>(null)
+  const [availablePlans, setAvailablePlans] = useState<ResolvedGameplan[]>([])
   const [gymQuery, setGymQuery] = useState('')
   const [gymSuggestions, setGymSuggestions] = useState<GymSuggestion[]>([])
   const [gymLoading, setGymLoading] = useState(false)
@@ -198,13 +330,17 @@ export default function StartHome() {
   const [isShaking, setIsShaking] = useState(false)
   const [barPulseActive, setBarPulseActive] = useState(false)
   const [progressCountFlash, setProgressCountFlash] = useState(false)
-  const [unlockSequence, setUnlockSequence] = useState<{ previousTitle: string; nextTitle: string; nextLabel: string } | null>(null)
+  const [debugQueueMode, setDebugQueueMode] = useState<'normal' | 'new'>('normal')
   const [flyingVideoStyle, setFlyingVideoStyle] = useState<CSSProperties | null>(null)
+  const [isSavedClip, setIsSavedClip] = useState(false)
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false)
+  const [videoKey, setVideoKey] = useState(0)
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [profileLoaded, setProfileLoaded] = useState(false)
   const videoShellRef = useRef<HTMLDivElement | null>(null)
   const progressBarRef = useRef<HTMLDivElement | null>(null)
   const swapTimerRef = useRef<number | null>(null)
   const settleTimerRef = useRef<number | null>(null)
-  const unlockTimerRef = useRef<number | null>(null)
   const hasInitializedDisplayCardRef = useRef(false)
   const unlockSnapshotRef = useRef<{
     currentNodeId: string | null
@@ -221,7 +357,25 @@ export default function StartHome() {
       return
     }
 
-    const [profileResult, progressResult, eventsResult] = await Promise.all([
+    // Set initial state immediately with user data to show content faster
+    setStartState({
+      userId: user.id,
+      username: user.user_metadata?.username ?? null,
+      fullName: user.user_metadata?.full_name ?? null,
+      email: user.email ?? null,
+      avatarUrl: user.user_metadata?.avatar_url ?? null,
+      primaryArchetype: null,
+      gymName: null,
+      gymPlaceId: null,
+      gymLocation: null,
+      gymSource: null,
+      gymUnlistedName: null,
+    })
+    // Show content immediately - don't wait for profile
+    setLoading(false)
+
+    // Load profile and progress in parallel (don't block UI)
+    Promise.all([
       loadUserProfileSafe(supabase, user.id),
       (async () => {
         const result = await supabase.from('progress').select('node_id, completed, validated').eq('user_id', user.id)
@@ -233,56 +387,455 @@ export default function StartHome() {
         }
       })(),
       supabase.from('training_clip_events').select('node_id, clip_key, clip_type, result, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
-    ])
+    ]).then(([profileResult, progressResult, eventsResult]) => {
+      const profile = profileResult.data as any
 
-    const profile = profileResult.data as any
-
-    setStartState({
-      userId: user.id,
-      username: profile?.username ?? null,
-      fullName: profile?.full_name ?? user.user_metadata?.full_name ?? null,
-      email: profile?.email ?? user.email ?? null,
-      avatarUrl: profile?.avatar_url ?? user.user_metadata?.avatar_url ?? null,
-      primaryArchetype: profile?.primary_archetype ?? null,
-      gymName: profile?.gym_name ?? null,
-      gymPlaceId: profile?.gym_place_id ?? null,
-      gymLocation: profile?.gym_location ?? null,
-      gymSource: profile?.gym_source ?? null,
-      gymUnlistedName: profile?.gym_unlisted_name ?? null,
+      // Update state with full data
+      setStartState({
+        userId: user.id,
+        username: profile?.username ?? user.user_metadata?.username ?? null,
+        fullName: profile?.full_name ?? user.user_metadata?.full_name ?? null,
+        email: profile?.email ?? user.email ?? null,
+        avatarUrl: profile?.avatar_url ?? user.user_metadata?.avatar_url ?? null,
+        primaryArchetype: profile?.primary_archetype ?? null,
+        gymName: profile?.gym_name ?? null,
+        gymPlaceId: profile?.gym_place_id ?? null,
+        gymLocation: profile?.gym_location ?? null,
+        gymSource: profile?.gym_source ?? null,
+        gymUnlistedName: profile?.gym_unlisted_name ?? null,
+      })
+      setUsernameDraft(profile?.username ?? '')
+      const progressRows = (progressResult.data ?? []) as ProgressRow[]
+      setCompletedIds(progressRows.filter((entry) => entry.completed).map((entry) => entry.node_id))
+      setValidatedIds(progressRows.filter((entry) => entry.validated).map((entry) => entry.node_id))
+      setEvents((eventsResult.data ?? []) as QueueEvent[])
+      setProfileLoaded(true)
+      window.dispatchEvent(new Event('profile-ready-changed'))
     })
-    setUsernameDraft(profile?.username ?? '')
-    const progressRows = (progressResult.data ?? []) as ProgressRow[]
-    setCompletedIds(progressRows.filter((entry) => entry.completed).map((entry) => entry.node_id))
-    setValidatedIds(progressRows.filter((entry) => entry.validated).map((entry) => entry.node_id))
-    setEvents((eventsResult.data ?? []) as QueueEvent[])
-    setLoading(false)
-    window.dispatchEvent(new Event('profile-ready-changed'))
   }, [router, supabase])
+
+  const loadServerQueue = useCallback(async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const headers: Record<string, string> = {}
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`
+      }
+
+      const response = await fetch('/api/start-queue', { 
+        cache: 'no-store', 
+        headers 
+      })
+      
+      // Set loading false immediately after first response
+      setLoading(false)
+      
+      const payload = (await response.json()) as { queue?: QueueCard[] }
+      if (!response.ok) {
+        setServerQueue(null)
+        return
+      }
+      setServerQueue(payload.queue ?? [])
+    } catch {
+      setLoading(false)
+      setServerQueue(null)
+    }
+  }, [supabase])
 
   useEffect(() => {
     void loadState()
   }, [loadState])
 
+  useEffect(() => {
+    void loadServerQueue()
+  }, [loadServerQueue])
+
   const loadActivePlan = useCallback(async () => {
     try {
-      const response = await fetch('/api/gameplan/active', { cache: 'no-store' })
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const headers: Record<string, string> = {}
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`
+      }
+
+      const response = await fetch('/api/gameplan/active', { cache: 'no-store', headers })
       const payload = (await response.json()) as { plan?: ResolvedGameplan }
       if (!response.ok || !payload.plan) {
         setActivePlan(null)
-        return
+        return null
       }
       setActivePlan(payload.plan)
+      setAvailablePlans((current) => (current.length > 0 ? current : [payload.plan as ResolvedGameplan]))
+      return payload.plan
     } catch {
       setActivePlan(null)
+      return null
     }
-  }, [])
+  }, [supabase])
+
+  const loadAvailablePlans = useCallback(async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const headers: Record<string, string> = {}
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`
+      }
+
+      const response = await fetch('/api/gameplan/list', { cache: 'no-store', headers })
+      const payload = (await response.json()) as { plans?: ResolvedGameplan[] }
+      if (!response.ok || !Array.isArray(payload.plans) || payload.plans.length === 0) {
+        return
+      }
+
+      setAvailablePlans(payload.plans)
+    } catch {
+      // The active plan fallback is enough to keep the start page usable.
+    }
+  }, [supabase])
 
   useEffect(() => {
     void loadActivePlan()
   }, [loadActivePlan])
 
+  useEffect(() => {
+    void loadAvailablePlans()
+  }, [loadAvailablePlans])
+
+  const loadingClipArchiveRef = useRef<Set<string>>(new Set())
+  const loadedClipArchiveRef = useRef<Set<string>>(new Set())
+  const [loadingClipArchiveForNodes, setLoadingClipArchiveForNodes] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!activePlan?.unlockSummary.visibleNodeIds?.length && !activePlan?.unlockSummary.unlockedNodeIds?.length) return
+
+    const nodesToLoad = Array.from(new Set([...activePlan.unlockSummary.visibleNodeIds, ...activePlan.unlockSummary.unlockedNodeIds]))
+    const visibleNodes = nodesToLoad
+      .map((nid) => activePlan.nodes[nid])
+      .filter(Boolean)
+
+    const uncachedNodes = visibleNodes.filter((node) => {
+      const sourceId = node.sourceNodeId ?? node.id
+      return !loadedClipArchiveRef.current.has(sourceId) && !loadingClipArchiveRef.current.has(sourceId)
+    })
+    if (uncachedNodes.length === 0) return
+    const loadingNodeIds = uncachedNodes.map((node) => node.sourceNodeId ?? node.id)
+
+    for (const sourceId of loadingNodeIds) {
+      loadingClipArchiveRef.current.add(sourceId)
+    }
+    setLoadingClipArchiveForNodes((prev) => {
+      const next = new Set(prev)
+      for (const sourceId of loadingNodeIds) {
+        next.add(sourceId)
+      }
+      return next
+    })
+
+    const customTechniques = readCustomTechniques()
+
+    let active = true
+    async function loadArchiveVideos() {
+      const supabase = createClient()
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      const results: Record<string, { id: string; title: string; url: string; thumbnailUrl: string | null; description?: string | null; hashtags?: string[] }[]> = {}
+
+      await Promise.all(
+        uncachedNodes.map(async (node) => {
+          const sourceId = node.sourceNodeId ?? node.id
+
+          const aliasIds: string[] = []
+          if (node.sourceNodeId && node.sourceNodeId !== node.id) {
+            aliasIds.push(node.sourceNodeId)
+          }
+          const matchingPlanTitle = node.title.trim().toLowerCase()
+          for (const visibleNode of visibleNodes) {
+            const visibleSourceId = visibleNode.sourceNodeId ?? visibleNode.id
+            if (visibleSourceId !== sourceId && visibleNode.title.trim().toLowerCase() === matchingPlanTitle) {
+              aliasIds.push(visibleSourceId)
+            }
+          }
+          const matchingTitle = node.title.trim().toLowerCase()
+          for (const ct of customTechniques) {
+            if (ct.title.trim().toLowerCase() === matchingTitle) {
+              aliasIds.push(ct.id)
+            }
+          }
+
+          try {
+            const headers: Record<string, string> = {}
+            if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+
+            const aliasParam = aliasIds.length > 0 ? `&aliasIds=${encodeURIComponent(aliasIds.join(','))}` : ''
+            const response = await fetch(`/api/node-clips?nodeId=${encodeURIComponent(sourceId)}${aliasParam}`, {
+              cache: 'no-store',
+              headers,
+            })
+            if (!response.ok) {
+              results[sourceId] = []
+              return
+            }
+            const payload = (await response.json()) as {
+              groups?: {
+                main_reference?: { id: string; title: string; video_url?: string | null; source_url?: string | null; summary?: string | null; hashtags?: string[] | null }[]
+                counter_reference?: { id: string; title: string; video_url?: string | null; source_url?: string | null; summary?: string | null; hashtags?: string[] | null }[]
+                drill_reference?: { id: string; title: string; video_url?: string | null; source_url?: string | null; summary?: string | null; hashtags?: string[] | null }[]
+                related_reference?: { id: string; title: string; video_url?: string | null; source_url?: string | null; summary?: string | null; hashtags?: string[] | null }[]
+              }
+            }
+            const groups = payload.groups
+            if (!groups) {
+              results[sourceId] = []
+              return
+            }
+
+            const allClips = [
+              ...(groups.main_reference ?? []),
+              ...(groups.counter_reference ?? []),
+              ...(groups.drill_reference ?? []),
+              ...(groups.related_reference ?? []),
+            ]
+
+            const videos = allClips
+              .filter((clip) => clip.video_url || clip.source_url)
+              .map((clip) => ({
+                id: clip.id,
+                title: clip.title,
+                url: clip.video_url || clip.source_url || '',
+                thumbnailUrl: getClipPreviewImage(clip.video_url || clip.source_url || ''),
+                description: clip.summary ?? null,
+                hashtags: Array.isArray(clip.hashtags) ? clip.hashtags : [],
+              }))
+
+            results[sourceId] = videos
+          } catch {
+            // skip failed node - set empty result so we don't keep loading
+            results[sourceId] = []
+          }
+        })
+      )
+
+      if (!active) return
+      setClipArchiveVideos((current) => ({ ...current, ...results }))
+      for (const sourceId of loadingNodeIds) {
+        loadedClipArchiveRef.current.add(sourceId)
+        loadingClipArchiveRef.current.delete(sourceId)
+      }
+      setLoadingClipArchiveForNodes((prev) => {
+        const next = new Set(prev)
+        for (const sourceId of loadingNodeIds) {
+          next.delete(sourceId)
+        }
+        return next
+      })
+    }
+
+    void loadArchiveVideos()
+    return () => {
+      active = false
+      loadingNodeIds.forEach((sourceId) => loadingClipArchiveRef.current.delete(sourceId))
+      setLoadingClipArchiveForNodes((prev) => {
+        const next = new Set(prev)
+        loadingNodeIds.forEach((sourceId) => next.delete(sourceId))
+        return next
+      })
+    }
+  }, [activePlan])
+
+  useEffect(() => {
+    if (!activePlan?.unlockSummary.visibleNodeIds?.length && !activePlan?.unlockSummary.unlockedNodeIds?.length) return
+    if (!startState?.userId) return
+
+    const planSnapshot = activePlan
+    const userId = startState.userId
+    let active = true
+    async function loadVisibleClipProgress() {
+      const nodesToLoad = Array.from(new Set([...planSnapshot.unlockSummary.visibleNodeIds, ...planSnapshot.unlockSummary.unlockedNodeIds]))
+      const visibleNodes = nodesToLoad
+        .map((nodeId) => planSnapshot.nodes[nodeId])
+        .filter(Boolean)
+      if (visibleNodes.length === 0) return
+
+      const [{ data: knownEvents }, { data: statuses }] = await Promise.all([
+        supabase
+          .from('training_clip_events')
+          .select('node_id, clip_key')
+          .eq('user_id', userId)
+          .eq('result', 'known'),
+        supabase
+          .from('training_clip_status')
+          .select('node_id, clip_key, clip_id, can_count, cannot_count, last_result')
+          .eq('user_id', userId),
+      ])
+
+      const knownEventEntries = knownEvents ?? []
+      const customTechniques = readCustomTechniques()
+      const nextProgress: Record<string, { completed: number; total: number; percent: number }> = {}
+      const aliasPlans = availablePlans.length > 0 ? availablePlans : [planSnapshot]
+
+      await Promise.all(
+        visibleNodes.map(async (node) => {
+          const sourceNodeId = node.sourceNodeId ?? node.id
+          const lookupIds = getClipProgressLookupIds(node, aliasPlans, customTechniques)
+
+          const clipRefs: { id?: string | null; url: string }[] = []
+          const pushClipRef = (clip: { id?: string | null; url?: string | null }) => {
+            const url = clip.url ?? ''
+            if (url && !clipRefs.some((entry) => entry.url === url)) {
+              clipRefs.push({ id: clip.id ?? null, url })
+            }
+          }
+
+          try {
+            const aliasIds = lookupIds.filter((id) => id !== sourceNodeId)
+            const aliasParam = aliasIds.length > 0 ? `&aliasIds=${encodeURIComponent(aliasIds.join(','))}` : ''
+            const response = await fetch(`/api/node-clips?nodeId=${encodeURIComponent(sourceNodeId)}${aliasParam}`, { cache: 'no-store' })
+            const payload = (await response.json()) as {
+              groups?: {
+                main_reference?: { id?: string | null; video_url?: string | null; source_url?: string | null }[]
+                counter_reference?: { id?: string | null; video_url?: string | null; source_url?: string | null }[]
+                drill_reference?: { id?: string | null; video_url?: string | null; source_url?: string | null }[]
+                related_reference?: { id?: string | null; video_url?: string | null; source_url?: string | null }[]
+              }
+            }
+            const groups = payload.groups
+            if (response.ok && groups) {
+              ;[
+                ...(groups.main_reference ?? []),
+                ...(groups.counter_reference ?? []),
+                ...(groups.drill_reference ?? []),
+                ...(groups.related_reference ?? []),
+              ].forEach((clip) => pushClipRef({ id: clip.id, url: clip.video_url ?? clip.source_url }))
+            }
+          } catch {
+            // Fallback below keeps the start page progress usable without archive clips.
+          }
+
+          if (clipRefs.length === 0) {
+            const catalogEntry = getTechniqueCatalogEntryForPlanNode(node)
+            ;(catalogEntry?.videos ?? []).forEach((video) => pushClipRef({ url: video.url }))
+          }
+
+          if (clipRefs.length === 0) {
+            const fallbackNode = getNodeById(sourceNodeId)
+            ;(fallbackNode?.videos ?? []).forEach((video) => pushClipRef({ url: video.url }))
+          }
+
+          const progress = calculateClipProgressForNode({
+            node,
+            lookupIds,
+            clipRefs,
+            knownEvents: knownEventEntries,
+            statuses: statuses ?? [],
+          })
+          if (!progress) return
+
+          nextProgress[node.id] = progress
+          nextProgress[sourceNodeId] = progress
+        })
+      )
+
+      if (!active) return
+      setClipProgressByNodeId((current) => {
+        const currentSerialized = JSON.stringify(current)
+        const nextSerialized = JSON.stringify(nextProgress)
+        return currentSerialized === nextSerialized ? current : nextProgress
+      })
+    }
+
+    void loadVisibleClipProgress()
+    return () => {
+      active = false
+    }
+  }, [activePlan, availablePlans, events.length, startState?.userId, supabase])
+
   const assignedArchetype = ARCHETYPES.find((item) => item.id === startState?.primaryArchetype) ?? null
-  const queue = useMemo(() => buildStartQueue(completedIds, events, activePlan), [activePlan, completedIds, events])
+  const effectiveActivePlan = useMemo<ResolvedGameplan | null>(() => {
+    if (!activePlan?.unlockSummary.currentNodeId) return activePlan
+
+    const currentNodeId = activePlan.unlockSummary.currentNodeId
+    const currentIndex = activePlan.mainPath.indexOf(currentNodeId)
+    if (currentIndex < 0) return activePlan
+
+    const currentNode = activePlan.nodes[currentNodeId]
+    const currentSourceNodeId = currentNode?.sourceNodeId ?? currentNode?.id ?? currentNodeId
+    const currentProgress = clipProgressByNodeId[currentNodeId] ?? clipProgressByNodeId[currentSourceNodeId]
+    const shouldAdvance =
+      Boolean(currentProgress?.total && currentProgress.total > 0) &&
+      (currentProgress?.completed ?? 0) >= (currentProgress?.total ?? 0)
+
+    if (!shouldAdvance) return activePlan
+
+    const nextCurrentNodeId = activePlan.mainPath[currentIndex + 1] ?? null
+    if (!nextCurrentNodeId) return activePlan
+
+    const nextPreviewNodeId = activePlan.mainPath[currentIndex + 2] ?? null
+    const nodes = { ...activePlan.nodes }
+
+    activePlan.mainPath.forEach((nodeId, index) => {
+      const node = nodes[nodeId]
+      if (!node) return
+
+      if (index <= currentIndex) {
+        nodes[nodeId] = { ...node, state: 'completed' }
+        return
+      }
+
+      if (nodeId === nextCurrentNodeId) {
+        nodes[nodeId] = { ...node, state: 'current' }
+        return
+      }
+
+      if (nodeId === nextPreviewNodeId) {
+        nodes[nodeId] = { ...node, state: 'locked' }
+      }
+    })
+
+    const nextCurrentNode = nodes[nextCurrentNodeId]
+    return {
+      ...activePlan,
+      nodes,
+      unlockSummary: {
+        ...activePlan.unlockSummary,
+        currentNodeId: nextCurrentNodeId,
+        currentSourceNodeId: nextCurrentNode?.sourceNodeId ?? nextCurrentNode?.id ?? nextCurrentNodeId,
+        unlockedNodeIds: Array.from(new Set([...activePlan.unlockSummary.unlockedNodeIds, currentNodeId, nextCurrentNodeId])),
+        visibleNodeIds: Array.from(new Set([...activePlan.unlockSummary.visibleNodeIds, currentNodeId, nextCurrentNodeId, nextPreviewNodeId].filter((nodeId): nodeId is string => Boolean(nodeId)))),
+      },
+    }
+  }, [activePlan, clipProgressByNodeId])
+
+  const queue = useMemo(() => {
+    // Convert clipArchiveVideos to QueueClipGroups format for buildStartQueue
+    const clipGroupsByNodeId: Record<string, { main_reference: { id: string; title: string; url: string; role: 'main_reference'; displayOrder: number }[] }> = {}
+    for (const [nodeId, videos] of Object.entries(clipArchiveVideos)) {
+      clipGroupsByNodeId[nodeId] = {
+        main_reference: videos.map((video, index) => ({
+          id: video.id,
+          title: video.title,
+          url: video.url,
+          role: 'main_reference' as const,
+          displayOrder: index,
+          description: video.description ?? null,
+          hashtags: video.hashtags ?? [],
+        })),
+      }
+    }
+
+    // Always build local queue with loaded clips
+    const localQueue = buildStartQueue(completedIds, events, effectiveActivePlan, clipGroupsByNodeId)
+
+    const mergedQueue = mergeQueueCards(serverQueue, localQueue)
+    return rotateQueueCards(mergedQueue, getLatestLocalQueueIndex(mergedQueue, events))
+  }, [completedIds, effectiveActivePlan, events, serverQueue, clipArchiveVideos])
   const primaryCard = queue[0]
   const hasGym = Boolean(startState?.gymPlaceId ?? startState?.gymName ?? startState?.gymUnlistedName)
   const displayName = startState?.username ?? startState?.fullName ?? startState?.email?.split('@')[0] ?? 'BJJ Athlete'
@@ -304,29 +857,306 @@ export default function StartHome() {
   }, [completedIds.length, validatedIds.length])
   const visibleCard = displayCard ?? primaryCard ?? null
   const activePlanNode = useMemo(() => {
-    const currentNodeId = activePlan?.unlockSummary.currentNodeId
+    const currentNodeId = effectiveActivePlan?.unlockSummary.currentNodeId
     if (!currentNodeId) return null
-    return activePlan?.nodes[currentNodeId] ?? null
-  }, [activePlan])
-  const currentTechniqueProgress = useMemo(() => {
-    if (activePlanNode) {
-      const completed = activePlanNode.progressCompletedRules ?? 0
-      const total = activePlanNode.progressTotalRules ?? 0
+    return effectiveActivePlan?.nodes[currentNodeId] ?? null
+  }, [effectiveActivePlan])
+  const visibleCardResolvedClip = useMemo<ClipPreview | null>(() => {
+    if (!visibleCard) {
+      return null
+    }
+
+    if (visibleCard.clipUrl) {
       return {
-        completed,
-        total,
-        percent: total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0,
+        id: visibleCard.videoKey,
+        title: visibleCard.clipTitle,
+        url: visibleCard.clipUrl,
+        thumbnailUrl: getClipPreviewImage(visibleCard.clipUrl),
+        usesAssignedClip: true,
+        videoKey: visibleCard.videoKey,
       }
     }
 
-    const fallbackNode = visibleCard ? getNodeById(visibleCard.nodeId) : null
-    return {
-      completed: 0,
-      total: fallbackNode?.completionRules.length ?? 0,
-      percent: 0,
+    const queueClipCard = queue.find(
+      (card) => card.nodeId === visibleCard.nodeId && card.title === visibleCard.title && card.clipUrl
+    )
+    if (queueClipCard) {
+      return {
+        id: queueClipCard.videoKey,
+        title: queueClipCard.clipTitle,
+        url: queueClipCard.clipUrl,
+        thumbnailUrl: getClipPreviewImage(queueClipCard.clipUrl),
+        usesAssignedClip: true,
+        videoKey: queueClipCard.videoKey,
+      }
     }
-  }, [activePlanNode, visibleCard])
-  const visiblePreviewImage = visibleCard ? getClipPreviewImage(visibleCard.clipUrl) : null
+
+    const matchingPlanNode =
+      Object.values(effectiveActivePlan?.nodes ?? {}).find((node) => {
+        const sourceId = node.sourceNodeId ?? node.id
+        return sourceId === visibleCard.nodeId || node.id === visibleCard.nodeId
+      }) ?? null
+
+    const sourceId = matchingPlanNode?.sourceNodeId ?? matchingPlanNode?.id ?? visibleCard.nodeId
+
+    // Check if clips are still loading for this node
+    const isLoadingClips = loadingClipArchiveForNodes.has(sourceId)
+
+    const assignedVideo = clipArchiveVideos[sourceId]?.[0] ?? null
+    if (assignedVideo?.url) {
+      const assignedVideoIndex = clipArchiveVideos[sourceId]?.findIndex((video) => video.url === assignedVideo.url) ?? 0
+      return {
+        id: assignedVideo.id,
+        title: assignedVideo.title,
+        url: assignedVideo.url,
+        thumbnailUrl: assignedVideo.thumbnailUrl,
+        usesAssignedClip: true,
+        videoKey: `${sourceId}-video-${Math.max(0, assignedVideoIndex)}`,
+      }
+    }
+
+    // If clips are still loading, don't show fallback yet
+    if (isLoadingClips) {
+      return null
+    }
+
+    const entry = getTechniqueCatalogEntryForPlanNode(matchingPlanNode ?? { id: visibleCard.nodeId, sourceNodeId: visibleCard.nodeId, title: visibleCard.title, label: '' })
+    const fallbackNode = getNodeById(sourceId)
+    const fallbackVideo =
+      entry?.videos?.[0]
+        ? {
+            id: `${sourceId}-video-0`,
+            title: entry.videos[0].title,
+            url: entry.videos[0].url,
+            thumbnailUrl: getClipPreviewImage(entry.videos[0].url),
+            videoKey: `${sourceId}-video-0`,
+          }
+        : fallbackNode?.videos?.[0]
+          ? {
+              id: `${sourceId}-video-0`,
+              title: fallbackNode.videos[0].title,
+              url: fallbackNode.videos[0].url,
+              thumbnailUrl: getClipPreviewImage(fallbackNode.videos[0].url),
+              videoKey: `${sourceId}-video-0`,
+            }
+          : null
+
+    if (!fallbackVideo?.url) {
+      return null
+    }
+
+    return {
+      ...fallbackVideo,
+      usesAssignedClip: false,
+      }
+  }, [effectiveActivePlan, clipArchiveVideos, queue, visibleCard, loadingClipArchiveForNodes])
+  const activeClipTitle = visibleCardResolvedClip?.title ?? visibleCard?.clipTitle ?? ''
+  const activeSavedClipId = visibleCardResolvedClip
+    ? visibleCard?.clipId ?? (visibleCardResolvedClip.usesAssignedClip ? visibleCardResolvedClip.id : null)
+    : null
+  const activeVideoHeading = visibleCard
+    ? `${visibleCard.title.replace(/[.:]\s*$/, '')}: ${activeClipTitle}`.trim()
+    : ''
+  const isClipLoading = !visibleCardResolvedClip?.url
+  const currentTechniqueVideos = useMemo(() => {
+    if (!visibleCard) {
+      return []
+    }
+
+    const matchingPlanNode =
+      Object.values(effectiveActivePlan?.nodes ?? {}).find((node) => {
+        const sourceId = node.sourceNodeId ?? node.id
+        return sourceId === visibleCard.nodeId || node.id === visibleCard.nodeId
+      }) ?? {
+        id: visibleCard.nodeId,
+        title: visibleCard.title,
+        label: visibleCard.title,
+        sourceNodeId: visibleCard.nodeId,
+      }
+
+    const orderedVideos = getVisibleTechniqueVideosForNode(matchingPlanNode, clipArchiveVideos)
+    if (!visibleCardResolvedClip?.url) {
+      return orderedVideos
+    }
+
+    const activeIndex = orderedVideos.findIndex((video) => video.url === visibleCardResolvedClip.url)
+    if (activeIndex <= 0) {
+      return orderedVideos
+    }
+
+    return [orderedVideos[activeIndex], ...orderedVideos.slice(0, activeIndex), ...orderedVideos.slice(activeIndex + 1)]
+  }, [effectiveActivePlan, clipArchiveVideos, visibleCard, visibleCardResolvedClip?.url])
+  const visibleTechniqueQueueCards = useMemo(() => {
+    if (!visibleCard) {
+      return []
+    }
+
+    const baseNodeId = visibleCard.nodeId
+
+    const queueCardsForSameNode = queue.filter((card) => card.nodeId === baseNodeId && card.clipUrl)
+    const currentTechniqueCards = queueCardsForSameNode.length > 1
+      ? queueCardsForSameNode
+      : currentTechniqueVideos.length > 1
+        ? currentTechniqueVideos.map((video, index): QueueCard => {
+            const videoKeys = currentTechniqueVideos.map((v) => v.videoKey)
+            return {
+              ...visibleCard,
+              id: videoKeys[index],
+              videoKey: videoKeys[index],
+              videoKeys,
+              coreVideoKeys: visibleCard.coreVideoKeys ?? videoKeys,
+              clipId: video.id,
+              videoIndex: index,
+              totalVideos: currentTechniqueVideos.length,
+              clipTitle: video.title,
+              clipDescription: video.description ?? visibleCard.clipDescription,
+              clipHashtags: video.hashtags ?? visibleCard.clipHashtags,
+              clipUrl: video.url,
+              clipSource: getClipSourceFromUrl(video.url),
+            }
+          })
+        : []
+
+    return currentTechniqueCards
+  }, [currentTechniqueVideos, queue, visibleCard])
+  const currentTechniqueProgress = useMemo(() => {
+    if (!activePlanNode && !visibleCard) {
+      return { completed: 0, total: 0, percent: 0 }
+    }
+
+    const visibleCardNode =
+      Object.values(effectiveActivePlan?.nodes ?? {}).find((node) => {
+        const sourceId = node.sourceNodeId ?? node.id
+        return sourceId === visibleCard?.nodeId || node.id === visibleCard?.nodeId
+      }) ??
+      null
+    const progressNode = visibleCardNode ?? activePlanNode ?? null
+    const progressSourceId = progressNode?.sourceNodeId ?? progressNode?.id ?? visibleCard?.nodeId ?? ''
+    const progressLookupIds = Array.from(new Set([progressSourceId, progressNode?.id, visibleCard?.nodeId].filter((key): key is string => Boolean(key))))
+    const localLatestResultsByClipKey = new Map<string, QueueEvent['result']>()
+    events.forEach((event) => {
+      if (!progressLookupIds.some((lookupId) => event.node_id === lookupId || event.clip_key.startsWith(`${lookupId}-`))) return
+      if (localLatestResultsByClipKey.has(event.clip_key)) return
+      localLatestResultsByClipKey.set(event.clip_key, event.result)
+    })
+    const localKnownClipKeys = new Set(
+      Array.from(localLatestResultsByClipKey.entries())
+        .filter(([, result]) => result === 'known')
+        .map(([clipKey]) => clipKey)
+    )
+    const patchedProgress = progressNode
+      ? clipProgressByNodeId[progressNode.id] ?? clipProgressByNodeId[progressSourceId]
+      : visibleCard?.nodeId
+        ? clipProgressByNodeId[visibleCard.nodeId]
+        : undefined
+
+    if (patchedProgress?.total && patchedProgress.total > 0) {
+      const completed = Math.min(patchedProgress.total, Math.max(patchedProgress.completed, localKnownClipKeys.size))
+      return {
+        ...patchedProgress,
+        completed,
+        percent: Math.max(0, Math.min(100, Math.round((completed / patchedProgress.total) * 100))),
+      }
+    }
+
+    if (progressNode?.progressTotalRules && progressNode.progressTotalRules > 0) {
+      return {
+        completed: Math.min(progressNode.progressTotalRules, progressNode.progressCompletedRules ?? 0),
+        total: progressNode.progressTotalRules,
+        percent: Math.max(0, Math.min(100, Math.round(((progressNode.progressCompletedRules ?? 0) / progressNode.progressTotalRules) * 100))),
+      }
+    }
+
+    const knownClipKeys = new Set(
+      Array.from(localLatestResultsByClipKey.entries())
+        .filter(([, result]) => result === 'known')
+        .map(([clipKey]) => clipKey)
+    )
+    const fallbackVideos =
+      progressNode
+        ? getVisibleTechniqueVideosForNode(progressNode, clipArchiveVideos)
+        : currentTechniqueVideos
+    const completed = fallbackVideos.filter((video) => knownClipKeys.has(video.videoKey) || knownClipKeys.has(video.id)).length
+    const total = Math.max(fallbackVideos.length, visibleCard?.totalVideos ?? 0, 1)
+
+    return {
+      completed: Math.min(total, completed),
+      total,
+      percent: total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0,
+    }
+  }, [effectiveActivePlan?.nodes, activePlanNode, clipArchiveVideos, clipProgressByNodeId, currentTechniqueVideos, events, visibleCard])
+
+  function hasProgressCreditForCard(card: QueueCard) {
+    if (card.progressCreditEarned) return true
+
+    const matchingPlanNode =
+      Object.values(effectiveActivePlan?.nodes ?? {}).find((node) => {
+        const sourceId = node.sourceNodeId ?? node.id
+        return sourceId === card.nodeId || node.id === card.nodeId
+      }) ?? null
+    const lookupIds = new Set([card.nodeId, matchingPlanNode?.id, matchingPlanNode?.sourceNodeId].filter((key): key is string => Boolean(key)))
+    const clipKeys = new Set([card.videoKey, card.id].filter(Boolean))
+
+    return events.some((event) => event.result === 'known' && lookupIds.has(event.node_id) && clipKeys.has(event.clip_key))
+  }
+
+  function givesNewProgress(card: QueueCard) {
+    return card.type === 'main' && card.isCore !== false && !hasProgressCreditForCard(card)
+  }
+
+  function getDebugQueueCardsForMode(mode: 'normal' | 'new') {
+    if (mode !== 'new') return queue
+
+    const newCards = queue.filter((card) => givesNewProgress(card))
+    const oldCards = queue.filter((card) => !givesNewProgress(card))
+    return newCards.length > 0 ? [...newCards, ...oldCards] : queue
+  }
+
+  const debugQueueCards = useMemo(() => {
+    const cards =
+      debugQueueMode === 'new'
+        ? getDebugQueueCardsForMode(debugQueueMode).filter((card) => givesNewProgress(card))
+        : getDebugQueueCardsForMode(debugQueueMode)
+    return cards.slice(0, 8)
+  }, [debugQueueMode, effectiveActivePlan?.nodes, events, queue])
+
+  function bumpClipProgressForCard(card: QueueCard) {
+    if (hasProgressCreditForCard(card)) return
+
+    const matchingPlanNode =
+      Object.values(effectiveActivePlan?.nodes ?? {}).find((node) => {
+        const sourceId = node.sourceNodeId ?? node.id
+        return sourceId === card.nodeId || node.id === card.nodeId
+      }) ?? null
+    const targetKeys = Array.from(new Set([card.nodeId, matchingPlanNode?.id, matchingPlanNode?.sourceNodeId].filter((key): key is string => Boolean(key))))
+    const fallbackTotal =
+      currentTechniqueProgress.total > 0
+        ? currentTechniqueProgress.total
+        : card.totalVideos > 0
+          ? card.totalVideos
+          : Math.max(card.videoKeys?.length ?? 0, 1)
+
+    setClipProgressByNodeId((current) => {
+      const next = { ...current }
+      const existing = targetKeys.map((key) => current[key]).find((progress) => progress && progress.total > 0)
+      const base = existing ?? { completed: 0, total: fallbackTotal, percent: 0 }
+      const total = Math.max(base.total, fallbackTotal, 1)
+      const completed = Math.min(total, base.completed + 1)
+      const progress = {
+        completed,
+        total,
+        percent: Math.max(0, Math.min(100, Math.round((completed / total) * 100))),
+      }
+
+      targetKeys.forEach((key) => {
+        next[key] = progress
+      })
+
+      return next
+    })
+  }
+
+  const visiblePreviewImage = visibleCardResolvedClip?.thumbnailUrl ?? null
   const spotlightDetail = quickDetails[0]
   const supportDetail = quickDetails[1]
 
@@ -362,21 +1192,44 @@ export default function StartHome() {
       return
     }
 
-    setUnlockSequence({
-      previousTitle: previousSnapshot.title ?? 'Vorheriger Schritt',
-      nextTitle: currentNode.title,
-      nextLabel: currentNode.label,
-    })
-    triggerProgressPulse()
+    window.localStorage.setItem(
+      GAMEPLAN_UNLOCK_EVENT_KEY,
+      JSON.stringify({
+        previousTitle: previousSnapshot.title ?? 'Vorheriger Schritt',
+        nextTitle: currentNode.title,
+        nextLabel: currentNode.label,
+        createdAt: new Date().toISOString(),
+      })
+    )
+  }, [activePlan])
 
-    if (unlockTimerRef.current) {
-      window.clearTimeout(unlockTimerRef.current)
+  const userSelectedCardRef = useRef<string | null>(null)
+
+  function handleDebugQueueModeChange(mode: 'normal' | 'new') {
+    const nextCard = getDebugQueueCardsForMode(mode)[0] ?? null
+    setDebugQueueMode(mode)
+
+    if (!nextCard) {
+      return
     }
 
-    unlockTimerRef.current = window.setTimeout(() => {
-      setUnlockSequence(null)
-    }, 2400)
-  }, [activePlan])
+    userSelectedCardRef.current = nextCard.id
+    setDisplayCard(nextCard)
+    setTransitionPhase('idle')
+  }
+
+  useEffect(() => {
+    if (debugQueueMode !== 'new') return
+
+    const nextCard = getDebugQueueCardsForMode('new')[0] ?? null
+    if (!nextCard || displayCard?.id === nextCard.id || displayCard?.videoKey === nextCard.videoKey) {
+      return
+    }
+
+    userSelectedCardRef.current = nextCard.id
+    setDisplayCard(nextCard)
+    setTransitionPhase('idle')
+  }, [debugQueueMode, displayCard?.id, displayCard?.videoKey, effectiveActivePlan?.nodes, events, queue])
 
   useEffect(() => {
     if (swapTimerRef.current) {
@@ -387,15 +1240,11 @@ export default function StartHome() {
       window.clearTimeout(settleTimerRef.current)
       settleTimerRef.current = null
     }
-    if (unlockTimerRef.current) {
-      window.clearTimeout(unlockTimerRef.current)
-      unlockTimerRef.current = null
-    }
 
     if (!primaryCard) {
       setDisplayCard(null)
-      setUnlockSequence(null)
       hasInitializedDisplayCardRef.current = false
+      userSelectedCardRef.current = null
       return
     }
 
@@ -407,8 +1256,35 @@ export default function StartHome() {
     }
 
     if (displayCard.id === primaryCard.id) {
+      if (shouldReplaceDisplayedCard(displayCard, primaryCard)) {
+        setDisplayCard(primaryCard)
+      }
       if (transitionPhase !== 'idle') {
         setTransitionPhase('idle')
+      }
+      return
+    }
+
+    if (userSelectedCardRef.current !== null) {
+      if (transitionPhase !== 'idle') {
+        setTransitionPhase('idle')
+      }
+      const selectedCard =
+        queue.find((card) => card.id === userSelectedCardRef.current || card.videoKey === userSelectedCardRef.current) ?? null
+      if (selectedCard && !shouldReplaceDisplayedCard(displayCard, selectedCard)) {
+        return
+      }
+      userSelectedCardRef.current = null
+    }
+
+    if (displayCard.nodeId === primaryCard.nodeId) {
+      if (transitionPhase !== 'idle') {
+        setTransitionPhase('idle')
+      }
+      const displayedCardStillExists = queue.some((card) => card.id === displayCard.id || card.videoKey === displayCard.videoKey)
+      if (!displayedCardStillExists || shouldReplaceDisplayedCard(displayCard, primaryCard)) {
+        userSelectedCardRef.current = null
+        setDisplayCard(primaryCard)
       }
       return
     }
@@ -423,7 +1299,7 @@ export default function StartHome() {
         setTransitionPhase('idle')
       }, 50)
     }, 400)
-  }, [displayCard, primaryCard, transitionPhase])
+  }, [displayCard, primaryCard, queue, transitionPhase])
 
   useEffect(() => {
     return () => {
@@ -432,9 +1308,6 @@ export default function StartHome() {
       }
       if (settleTimerRef.current) {
         window.clearTimeout(settleTimerRef.current)
-      }
-      if (unlockTimerRef.current) {
-        window.clearTimeout(unlockTimerRef.current)
       }
     }
   }, [])
@@ -519,6 +1392,40 @@ export default function StartHome() {
     void loadComments(primaryCard.id)
   }, [loadComments, primaryCard, startState])
 
+  // Load saved clip state when clip changes
+  useEffect(() => {
+    if (!startState || !visibleCardResolvedClip) {
+      setIsSavedClip(false)
+      return
+    }
+
+    const clipId = activeSavedClipId
+    if (!clipId) {
+      setIsSavedClip(false)
+      return
+    }
+
+    async function loadSavedState() {
+      const { data: auth } = await supabase.auth.getUser()
+      const user = auth.user
+      if (!user) {
+        setIsSavedClip(false)
+        return
+      }
+
+      const { data } = await supabase
+        .from('user_saved_clips')
+        .select('clip_id')
+        .eq('user_id', user.id)
+        .eq('clip_id', clipId)
+        .maybeSingle()
+
+      setIsSavedClip(Boolean(data?.clip_id))
+    }
+
+    void loadSavedState()
+  }, [activeSavedClipId, startState, visibleCardResolvedClip, supabase])
+
   useEffect(() => {
     if (!assignedArchetype || hasGym || manualGymMode) {
       setGymSuggestions([])
@@ -575,94 +1482,76 @@ export default function StartHome() {
       }
     }
 
-    const { error: insertError } = await supabase.from('training_clip_events').insert({
-      user_id: startState.userId,
+    const optimisticEvent: QueueEvent = {
       node_id: card.nodeId,
-      clip_key: card.id,
+      clip_key: card.videoKey,
       clip_type: card.type,
       result,
+      created_at: new Date().toISOString(),
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`
+    }
+
+    const response = await fetch('/api/training-queue', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        nodeId: card.nodeId,
+        clipKey: card.videoKey,
+        clipType: card.type,
+        clipId: card.clipId && /^[0-9a-f-]{36}$/i.test(card.clipId) ? card.clipId : null,
+        coreVideoKeys: card.coreVideoKeys ?? card.videoKeys,
+        validatedFromQuiz: Boolean(options?.validatedFromQuiz),
+        result,
+      }),
     })
+    const payload = (await response.json()) as { ok?: boolean; error?: string; nodeCompleted?: boolean; wasAlreadyCompleted?: boolean }
 
-    if (insertError) {
+    if (!response.ok || !payload.ok) {
       setSavingId(null)
-      setFeedback(`Aktion konnte nicht gespeichert werden: ${insertError.message}`)
+      setFeedback(`Aktion konnte nicht gespeichert werden: ${payload.error ?? 'Unbekannter Fehler.'}`)
       return
     }
 
-    let existingProgress: ProgressSnapshot = null
-    let progressLoadError: { message?: string } | null = null
-
-    const progressWithValidation = await supabase
-      .from('progress')
-      .select('watched, drilled, attempted, hit_in_sparring, completed, completed_at, validated, validated_at')
-      .eq('user_id', startState.userId)
-      .eq('node_id', card.nodeId)
-      .maybeSingle()
-
-    if (isMissingColumnError(progressWithValidation.error, 'validated')) {
-      const fallbackProgress = await supabase
-        .from('progress')
-        .select('watched, drilled, attempted, hit_in_sparring, completed, completed_at')
-        .eq('user_id', startState.userId)
-        .eq('node_id', card.nodeId)
-        .maybeSingle()
-
-      existingProgress = fallbackProgress.data ? { ...fallbackProgress.data, validated: false, validated_at: null } : null
-      progressLoadError = fallbackProgress.error
-    } else {
-      existingProgress = progressWithValidation.data
-      progressLoadError = progressWithValidation.error
+    if (result === 'known' && givesNewProgress(card)) {
+      bumpClipProgressForCard(card)
     }
-
-    if (progressLoadError) {
-      setSavingId(null)
-      setFeedback(`Fortschritt konnte nicht geladen werden: ${progressLoadError.message}`)
-      return
-    }
-
-    const alreadyValidated = Boolean(existingProgress?.validated) || validatedIds.includes(card.nodeId)
-    const justValidated = Boolean(options?.validatedFromQuiz)
-    const validationPassed = alreadyValidated || justValidated
-    const nodeCompleted = Boolean(existingProgress?.completed) || (result === 'known' && validationPassed)
-    const validatedValue = result === 'known' ? validationPassed : Boolean(existingProgress?.validated)
-
-    const progressPayload = {
-      user_id: startState.userId,
-      node_id: card.nodeId,
-      watched: true,
-      drilled: Boolean(existingProgress?.drilled) || result === 'relevant' || result === 'not_yet' || result === 'known',
-      attempted: Boolean(existingProgress?.attempted) || result === 'relevant' || result === 'known',
-      hit_in_sparring: Boolean(existingProgress?.hit_in_sparring) || result === 'known',
-      completed: nodeCompleted,
-      completed_at: nodeCompleted ? existingProgress?.completed_at ?? new Date().toISOString() : null,
-      validated: validatedValue,
-      validated_at: validatedValue ? existingProgress?.validated_at ?? new Date().toISOString() : null,
-    }
-
-    let progressError: { message?: string } | null = null
-    const progressUpsert = await supabase.from('progress').upsert(progressPayload, { onConflict: 'user_id,node_id' })
-
-    if (isMissingColumnError(progressUpsert.error, 'validated')) {
-      const { validated: _validated, validated_at: _validatedAt, ...fallbackPayload } = progressPayload
-      const fallbackUpsert = await supabase.from('progress').upsert(fallbackPayload, { onConflict: 'user_id,node_id' })
-      progressError = fallbackUpsert.error
-    } else {
-      progressError = progressUpsert.error
-    }
+    setEvents((current) => [optimisticEvent, ...current])
 
     setSavingId(null)
 
-    if (progressError) {
-      setFeedback(`Fortschritt konnte nicht gespeichert werden: ${progressError.message}`)
-      return
-    }
-
     setFeedback(null)
-    if (validatedValue && !validatedIds.includes(card.nodeId)) {
+    if (options?.validatedFromQuiz && !validatedIds.includes(card.nodeId)) {
       setValidatedIds((current) => [...current, card.nodeId])
     }
+    const nextPlan = await loadActivePlan()
+    if (payload.nodeCompleted && !payload.wasAlreadyCompleted && nextPlan) {
+      const nextNodeId = nextPlan.unlockSummary.currentNodeId
+      const nextNode = nextNodeId ? nextPlan.nodes[nextNodeId] ?? null : null
+      const nextSourceNodeId = nextNode ? nextNode.sourceNodeId ?? nextNode.id : null
+      if (nextNode && nextSourceNodeId !== card.nodeId) {
+        userSelectedCardRef.current = null
+        hasInitializedDisplayCardRef.current = false
+        setDisplayCard(null)
+        window.localStorage.setItem(
+          GAMEPLAN_UNLOCK_EVENT_KEY,
+          JSON.stringify({
+            previousTitle: card.title,
+            nextTitle: nextNode.title,
+            nextLabel: nextNode.label,
+            createdAt: new Date().toISOString(),
+          })
+        )
+      }
+    }
     await loadState()
-    await loadActivePlan()
+    await loadServerQueue()
   }
 
   function triggerProgressPulse() {
@@ -704,15 +1593,16 @@ export default function StartHome() {
       return
     }
 
-    if (result === 'known' && !validatedIds.includes(visibleCard.nodeId)) {
-      const node = getNodeById(visibleCard.nodeId)
-      if (node?.validationQuestion && node.validationOptions?.length && node.validationCorrectAnswer) {
-        void submitQueueResult(visibleCard, result)
-        return
-      }
-    }
+    const activeTechniqueCard =
+      visibleTechniqueQueueCards.find((card) => card.id === visibleCard.id || card.clipUrl === visibleCardResolvedClip?.url) ?? visibleCard
+    const activeTechniqueIndex = visibleTechniqueQueueCards.findIndex((card) => card.id === activeTechniqueCard.id)
+    const nextTechniqueCard =
+      activeTechniqueIndex >= 0 && visibleTechniqueQueueCards.length > 1
+        ? visibleTechniqueQueueCards[(activeTechniqueIndex + 1) % visibleTechniqueQueueCards.length]
+        : null
+    const shouldCreditProgress = result === 'known' && givesNewProgress(activeTechniqueCard)
 
-    if (result === 'known') {
+    if (shouldCreditProgress) {
       setFlyingVideoStyle(buildFlyingVideoStyle())
       setIsFlying(true)
       triggerProgressPulse()
@@ -720,12 +1610,20 @@ export default function StartHome() {
         setIsFlying(false)
         setFlyingVideoStyle(null)
       }, 820)
-    } else {
+    } else if (result === 'not_yet') {
       setIsShaking(true)
       window.setTimeout(() => setIsShaking(false), 420)
     }
 
-    void submitQueueResult(visibleCard, result)
+    if (nextTechniqueCard) {
+      const delay = shouldCreditProgress ? 520 : 260
+      userSelectedCardRef.current = nextTechniqueCard.id
+      window.setTimeout(() => {
+        setDisplayCard(nextTechniqueCard)
+      }, delay)
+    }
+
+    void submitQueueResult(activeTechniqueCard, result, { skipValidation: true })
   }
 
   async function handleValidationAnswer(option: string) {
@@ -1043,70 +1941,19 @@ export default function StartHome() {
     return <div className="h-40 rounded-3xl border border-bjj-border bg-bjj-card shimmer" />
   }
 
-  if (startState && !(startState.username ?? startState.fullName)) {
-    return (
-      <div className="relative overflow-hidden rounded-[2.5rem] border border-white/10 bg-[#0f1419] px-6 py-10 text-white shadow-[0_30px_80px_rgba(0,0,0,0.35)] md:px-10 md:py-12">
-        <div className="pointer-events-none absolute -left-20 top-0 h-64 w-64 rounded-full bg-[#ff006e]/15 blur-[120px]" />
-        <div className="pointer-events-none absolute right-[-5rem] top-1/2 h-72 w-72 rounded-full bg-[#00f2ff]/12 blur-[130px]" />
-
-        <div className="grid items-center gap-8 lg:grid-cols-[1.15fr_0.85fr]">
-          <section className="overflow-hidden rounded-[2.2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(255,0,110,0.2),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-6 md:p-8">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="rounded-full border border-[#ccff00]/20 bg-[#ccff00]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.28em] text-[#ccff00]">
-                Setup Mode
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.28em] text-slate-300">
-                5 Fragen. 1 klarer Plan.
-              </span>
-            </div>
-
-            <h1 className="mt-6 max-w-3xl text-4xl font-black uppercase leading-[0.95] md:text-6xl xl:text-7xl">
-              Definiere erst deinen Namen.
-              <span className="mt-2 block text-[#00f2ff]">Dann startet dein System.</span>
-            </h1>
-
-            <p className="mt-5 max-w-2xl text-base leading-relaxed text-slate-300 md:text-lg">
-              Das Verhalten bleibt gleich. Wir geben deiner Startseite nur eine deutlich staerkere Reel- und Hybrid-Optik.
-            </p>
-
-            <div className="mt-10 flex flex-nowrap items-center gap-3 overflow-x-auto pb-2">
-              {flowSteps.map((step, index) => (
-                <div key={step} className="flex shrink-0 items-center gap-3">
-                  <div className="rounded-[1.5rem] border border-white/10 bg-black/20 px-5 py-4 text-sm font-black uppercase tracking-[0.16em] text-white md:min-w-[150px] md:text-base">
-                    {step}
-                  </div>
-                  {index < flowSteps.length - 1 ? <ChevronUp className="h-5 w-5 rotate-90 text-[#ff006e]" /> : null}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-6 backdrop-blur-xl md:p-8">
-            <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-400">Dein Handle</p>
-            <h2 className="mt-3 text-3xl font-black uppercase leading-tight md:text-4xl">Wie soll dich die App nennen?</h2>
-            <div className="mt-6">
-              <label className="block text-[11px] font-black uppercase tracking-[0.22em] text-[#ccff00]">Name in der App</label>
-              <input
-                value={usernameDraft}
-                onChange={(event) => setUsernameDraft(event.target.value)}
-                placeholder="z. B. guardhunter"
-                className="mt-3 w-full rounded-[1.3rem] border border-white/10 bg-black/20 px-5 py-4 text-lg text-white outline-none placeholder:text-slate-500"
-              />
-            </div>
-            <button
-              onClick={() => void saveUsernameAndContinue()}
-              disabled={savingUsername}
-              className="mt-6 inline-flex w-full items-center justify-center rounded-[1.4rem] bg-[#ccff00] px-6 py-4 text-lg font-black uppercase tracking-[0.12em] text-black shadow-[0_0_30px_rgba(204,255,0,0.3)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {savingUsername ? 'Speichert...' : 'Archetypen herausfinden'}
-            </button>
-          </section>
-        </div>
-      </div>
-    )
+  // Warte bis das Profil geladen wurde, bevor wir den Archetyp-Check machen
+  if (!profileLoaded || !startState) {
+    return <div className="h-40 rounded-3xl border border-bjj-border bg-bjj-card shimmer" />
   }
 
-  if (!assignedArchetype) {
+  // Zeige Archetyp-Quiz nur wenn: 
+  // 1. Profil geladen UND 
+  // 2. Kein Archetype zugewiesen (null oder leerer String) UND
+  // 3. Kein activePlan vorhanden (User hat noch nicht mit dem Training begonnen)
+  const hasArchetype = Boolean(startState.primaryArchetype && startState.primaryArchetype !== '')
+  const hasStartedTraining = Boolean(effectiveActivePlan && completedIds.length > 0)
+  
+  if (!assignedArchetype && !hasArchetype && !hasStartedTraining) {
     return (
       <div className="relative overflow-hidden rounded-[2.5rem] border border-white/10 bg-[#0f1419] px-6 py-10 text-white shadow-[0_30px_80px_rgba(0,0,0,0.35)] md:px-10 md:py-12">
         <div className="pointer-events-none absolute -left-20 top-0 h-64 w-64 rounded-full bg-[#ff006e]/15 blur-[120px]" />
@@ -1262,18 +2109,6 @@ export default function StartHome() {
 
   return (
     <div className="space-y-5">
-      {unlockSequence ? (
-        <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden">
-          <div className="start-home-unlock-vignette absolute inset-0" />
-          <div className="absolute inset-x-4 top-24 flex justify-center md:inset-x-8">
-            <div className="start-home-unlock-banner max-w-xl rounded-full border border-bjj-gold/20 bg-[rgba(12,16,24,0.82)] px-5 py-3 text-center backdrop-blur-xl">
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-bjj-gold/75">Neue Technik freigeschaltet</p>
-              <p className="mt-2 text-lg font-black text-white md:text-xl">{unlockSequence.nextTitle}</p>
-              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-white/60">{unlockSequence.nextLabel}</p>
-            </div>
-          </div>
-        </div>
-      ) : null}
       {pendingValidation ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-xl rounded-[1.6rem] border border-bjj-border bg-bjj-card p-6 shadow-card">
@@ -1300,26 +2135,171 @@ export default function StartHome() {
       {/* Clean YouTube-Style Layout */}
       <div className="space-y-6">
         {/* Title above Video */}
-        <header
-          className={`start-home-slide transition-all duration-500 ${transitionPhase === 'out' ? 'start-home-slide-out' : ''} ${transitionPhase === 'prepare' ? 'start-home-slide-in' : ''} ${unlockSequence ? 'start-home-unlock-focus' : ''}`}
-        >
-          <h1 className="text-xl font-bold text-white lg:text-2xl">{visibleCard.title}</h1>
+        <header>
+          <h1 className="text-xl font-bold text-white lg:text-2xl">{activeVideoHeading}</h1>
         </header>
 
-        <div className={`relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_240px] start-home-slide transition-all duration-500 ${transitionPhase === 'out' ? 'start-home-slide-out' : ''} ${transitionPhase === 'prepare' ? 'start-home-slide-in' : ''} ${unlockSequence ? 'start-home-unlock-focus' : ''}`}>
+        <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_240px]">
           {/* Left: Video + Info */}
-          <div className="space-y-4">
+          <div className={`space-y-4 start-home-slide transition-all duration-500 ${transitionPhase === 'out' ? 'start-home-slide-out' : ''} ${transitionPhase === 'prepare' ? 'start-home-slide-in' : ''}`}>
             {/* Video Player */}
             <div
               ref={videoShellRef}
               className={`start-home-video-shell overflow-hidden rounded-xl bg-black transition-all duration-500 ${isShaking ? 'start-home-shake' : ''} ${isFlying ? 'opacity-60 blur-[1px]' : ''}`}
             >
-              <YoutubeEmbed title={visibleCard.clipTitle} url={visibleCard.clipUrl} />
+              {visibleCardResolvedClip?.url ? (
+                <YoutubeEmbed
+                  key={videoKey}
+                  title={visibleCardResolvedClip?.title ?? visibleCard.clipTitle}
+                  url={visibleCardResolvedClip?.url ?? visibleCard.clipUrl}
+                  showHeader={false}
+                  playbackRate={playbackRate}
+                />
+              ) : (
+                <div className="flex aspect-video items-center justify-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-bjj-gold/30 border-t-bjj-gold" />
+                    <p className="text-sm text-white/60">Lade Clip...</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Video Controls - direkt unter dem Video */}
+            {visibleCardResolvedClip?.url && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-white/10 bg-white/[0.02] py-3 px-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVideoKey((prev) => prev + 1)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-bjj-gold/30 bg-bjj-gold/10 px-4 py-2.5 text-sm font-medium text-bjj-gold transition hover:bg-bjj-gold/20"
+                    title="Zum Clip-Start springen"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    <span>Zum Start</span>
+                  </button>
+
+                  <label className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-sm font-medium text-white/80">
+                    <Gauge className="h-4 w-4 text-bjj-gold" />
+                    <span className="sr-only">Geschwindigkeit</span>
+                    <select
+                      value={playbackRate}
+                      onChange={(event) => setPlaybackRate(Number(event.target.value))}
+                      className="bg-transparent text-sm font-semibold text-white outline-none"
+                    >
+                      {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
+                        <option key={rate} value={rate} className="bg-bjj-card text-white">
+                          {rate}x
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {/* Favorite Button */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!startState || !visibleCardResolvedClip) return
+                    setIsLoadingSaved(true)
+
+                    const { data: auth } = await supabase.auth.getUser()
+                    const user = auth.user
+
+                    if (!user) {
+                      router.push('/login')
+                      setIsLoadingSaved(false)
+                      return
+                    }
+
+                    const clipId = activeSavedClipId
+                    if (!clipId) {
+                      setIsLoadingSaved(false)
+                      return
+                    }
+
+                    if (isSavedClip) {
+                      await supabase
+                        .from('user_saved_clips')
+                        .delete()
+                        .eq('user_id', user.id)
+                        .eq('clip_id', clipId)
+                      setIsSavedClip(false)
+                    } else {
+                      await supabase.from('user_saved_clips').insert({
+                        user_id: user.id,
+                        clip_id: clipId,
+                      })
+                      setIsSavedClip(true)
+                    }
+                    setIsLoadingSaved(false)
+                  }}
+                  disabled={isLoadingSaved || !activeSavedClipId}
+                  className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition disabled:opacity-50 ${
+                    isSavedClip
+                      ? 'border-bjj-gold/40 bg-bjj-gold/16 text-bjj-gold'
+                      : 'border-white/10 bg-white/[0.05] text-white/80 hover:bg-white/[0.1] hover:text-white'
+                  }`}
+                  title={isSavedClip ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen'}
+                >
+                  <Bookmark className={`h-4 w-4 ${isSavedClip ? 'fill-current' : ''}`} />
+                  <span>{isSavedClip ? 'Gespeichert' : 'Favorit'}</span>
+                </button>
+              </div>
+            )}
+
+            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-bjj-gold/80">Debug Queue</p>
+                <div className="flex rounded-lg border border-white/10 bg-black/20 p-1">
+                  {[
+                    ['normal', 'Normal'],
+                    ['new', 'Nur neue'],
+                  ].map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => handleDebugQueueModeChange(mode as 'normal' | 'new')}
+                      className={`rounded-md px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] transition ${
+                        debugQueueMode === mode ? 'bg-bjj-gold/20 text-bjj-gold' : 'text-white/42 hover:text-white/72'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="w-full text-[11px] font-semibold text-white/42">Top {debugQueueCards.length} aus der Start-Queue</p>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {debugQueueCards.map((card, index) => {
+                  const isCurrent = visibleCard?.id === card.id || visibleCard?.videoKey === card.videoKey
+                  const givesProgress = givesNewProgress(card)
+                  return (
+                    <div key={`${card.id}-${index}`} className={`rounded-lg border px-3 py-2 text-xs ${isCurrent ? 'border-bjj-gold/45 bg-bjj-gold/10' : 'border-white/8 bg-black/12'}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-bold text-white/86">{index + 1}. {card.title}</p>
+                        <span className={`rounded-md px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${givesProgress ? 'bg-green-500/15 text-green-300' : 'bg-white/8 text-white/46'}`}>
+                          {givesProgress ? 'Unlock-Fortschritt' : 'kein neuer Fortschritt'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-white/62">{card.clipTitle || 'Kein Clip-Titel'}</p>
+                      <p className="mt-1 break-all font-mono text-[10px] text-white/36">
+                        node={card.nodeId} key={card.videoKey} type={card.type} clip={card.clipId ?? 'fallback'}
+                      </p>
+                    </div>
+                  )
+                })}
+                {debugQueueCards.length === 0 ? (
+                  <p className="rounded-lg border border-white/8 bg-black/12 px-3 py-2 text-xs text-white/46">
+                    Keine neuen Videos mit Unlock-Fortschritt in der aktuellen Queue.
+                  </p>
+                ) : null}
+              </div>
             </div>
 
             <div className="rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/58">
-                <span>Technik Fortschritt</span>
+                <span>Nächste Technik</span>
                 <span className={progressCountFlash ? 'start-home-count-flash' : ''}>
                   {currentTechniqueProgress.completed}/{currentTechniqueProgress.total}
                 </span>
@@ -1342,7 +2322,7 @@ export default function StartHome() {
             <div className="flex justify-center gap-4 lg:hidden">
               <button
                 type="button"
-                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
                 onClick={() => handleAnimatedQueueAction('not_yet')}
                 className={`start-home-action-btn start-home-action-btn-negative flex h-28 w-40 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
               >
@@ -1352,7 +2332,7 @@ export default function StartHome() {
 
               <button
                 type="button"
-                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
                 onClick={() => handleAnimatedQueueAction('known')}
                 className={`start-home-action-btn start-home-action-btn-positive flex h-28 w-40 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
               >
@@ -1363,24 +2343,44 @@ export default function StartHome() {
 
             {/* Video Info */}
             <div className="space-y-3 pt-2">
+              {!visibleCardResolvedClip?.usesAssignedClip && visibleCardResolvedClip?.url && (
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/42">
+                  Ersatz-Clip, weil fuer diese Technik noch kein eigener Startseiten-Clip hinterlegt ist
+                </p>
+              )}
+              {visibleCard.clipDescription || visibleCard.clipHashtags?.length ? (
+                <div className="space-y-2 text-sm leading-6 text-white/58">
+                  {visibleCard.clipDescription ? <p>{visibleCard.clipDescription}</p> : null}
+                  {visibleCard.clipHashtags?.length ? (
+                    <p className="flex flex-wrap gap-2">
+                      {visibleCard.clipHashtags.slice(0, 8).map((tag) => (
+                        <span key={tag} className="rounded-md bg-white/[0.06] px-2 py-1 text-xs font-semibold text-white/58">
+                          #{tag.replace(/^#/, '')}
+                        </span>
+                      ))}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {/* Links only - no tags */}
               <div className="flex flex-wrap gap-3">
                 <Link 
                   href={`/node/${visibleCard.nodeId}`} 
                   className="inline-flex items-center gap-2 rounded-lg bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
                 >
-                  Technik Details
+                  Technik oeffnen
                   <ArrowUpRight className="h-4 w-4" />
                 </Link>
               </div>
             </div>
+
           </div>
 
           {/* Right: Clean Action Buttons (Desktop) - Centered, same size */}
           <div className="hidden flex-col items-center justify-center gap-4 lg:flex">
             <button
               type="button"
-              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
               onClick={() => handleAnimatedQueueAction('not_yet')}
               className={`start-home-action-btn start-home-action-btn-negative flex h-36 w-56 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
             >
@@ -1390,7 +2390,7 @@ export default function StartHome() {
 
             <button
               type="button"
-              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking}
+              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
               onClick={() => handleAnimatedQueueAction('known')}
               className={`start-home-action-btn start-home-action-btn-positive flex h-36 w-56 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
             >
@@ -1407,6 +2407,8 @@ export default function StartHome() {
           ) : null}
         </div>
       </div>
+
+
 
       {/* Legacy layout kept for rollback
       <div className="start-layout-replace">

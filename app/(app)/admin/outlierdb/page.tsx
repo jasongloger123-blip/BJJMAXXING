@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Bot, CheckCircle2, Database, Hash, KeyRound, Link2, Search, Sparkles } from 'lucide-react'
+import { Bot, CheckCircle2, ChevronDown, Database, Hash, KeyRound, Link2, Play, Save, Search, Sparkles, CheckSquare, Square } from 'lucide-react'
+import { YoutubeEmbed } from '@/components/YoutubeEmbed'
 import { ARCHETYPES } from '@/lib/archetypes'
 import { createClient } from '@/lib/supabase/client'
 import { CUSTOM_TECHNIQUES_EVENT, readCustomTechniques, updateCustomTechnique } from '@/lib/custom-techniques'
@@ -14,10 +15,21 @@ import {
   type ExternalTechniqueSearchRunRecord,
 } from '@/lib/external-technique-sources'
 import { getTechniqueCoverageLabel, normalizeTechniqueStyleCoverage, type TechniqueStyleCoverage } from '@/lib/technique-style'
-import { getNodeTechniqueCatalog } from '@/lib/technique-catalog'
+import { getTechniqueCatalogEntryById, getNodeTechniqueCatalog, type TechniqueCatalogEntry } from '@/lib/technique-catalog'
+import {
+  CLIP_CONTENT_TYPES,
+  CLIP_LEARNING_PHASES,
+  getClipContentTypeLabel,
+  getClipLearningPhaseLabel,
+  type ClipContentType,
+  type ClipLearningPhase,
+} from '@/lib/clip-taxonomy'
+import { appendStartSecondsToVideoUrl } from '@/lib/video-format'
 
 type ImportedSource = {
   id?: string
+  assignment_id?: string
+  assignment_role?: ExternalSourceRole | null
   assignment_status?: string
   provider: string
   source_url: string
@@ -25,6 +37,9 @@ type ImportedSource = {
   title: string
   video_url: string | null
   video_platform: string | null
+  content_type?: ClipContentType | null
+  learning_phase?: ClipLearningPhase | null
+  target_archetype_ids?: string[]
   style_coverage?: TechniqueStyleCoverage | null
   timestamp_label: string | null
   timestamp_seconds: number | null
@@ -80,6 +95,11 @@ type SourceListResponse = {
   sections?: GroupedSection[]
 }
 
+type NodeClipGroupsResponse = {
+  error?: string
+  groups?: Partial<Record<ExternalSourceRole, ImportedSource[]>>
+}
+
 type SearchRunListResponse = {
   error?: string
   runs?: ExternalTechniqueSearchRunRecord[]
@@ -128,6 +148,14 @@ function getSourceSummary(source: ImportedSource) {
 
 function getReadableSourceUrl(source: ImportedSource) {
   return source.video_url ?? source.source_url
+}
+
+function getSourceEditKey(source: ImportedSource) {
+  return source.id ?? source.source_url
+}
+
+function getSourcePreviewUrl(source: ImportedSource) {
+  return appendStartSecondsToVideoUrl(source.video_url ?? source.source_url, source.timestamp_seconds)
 }
 
 function getSourceDebug(source: ImportedSource) {
@@ -224,37 +252,106 @@ function getSectionBlocksWithSources(section: GroupedSection) {
 function SourceCard({
   source,
   active,
+  selected,
   onSelect,
+  onToggleSelection,
 }: {
   source: ImportedSource
   active: boolean
+  selected: boolean
   onSelect: () => void
+  onToggleSelection?: () => void
 }) {
+  const isAssigned = Boolean(source.assignment_id)
+  const assignedRoleLabel = source.assignment_role
+    ? getExternalSourceRoleLabel(source.assignment_role)
+    : null
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
       className={`w-full rounded-2xl border px-4 py-4 text-left transition-colors ${
-        active ? 'border-bjj-gold/40 bg-bjj-gold/10' : 'border-bjj-border bg-bjj-surface hover:border-bjj-gold/20'
+        active || selected
+          ? 'border-bjj-gold/40 bg-bjj-gold/10'
+          : isAssigned
+            ? 'border-green-500/40 bg-green-500/5 hover:border-green-500/60'
+            : 'border-bjj-border bg-bjj-surface hover:border-bjj-gold/20'
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-black text-white">{source.title}</p>
+      <div className="flex items-start gap-3">
+        {/* Checkbox fuer Mehrfachauswahl */}
+        {source.id && !isAssigned && (
+          <div className="shrink-0 pt-0.5">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggleSelection?.()
+              }}
+              disabled={isAssigned}
+              className={`flex h-5 w-5 items-center justify-center rounded-md border-2 transition-colors ${
+                selected
+                  ? 'border-bjj-gold bg-bjj-gold text-bjj-coal'
+                  : 'border-bjj-border hover:border-bjj-gold/60'
+              }`}
+            >
+              {selected && (
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
+        {isAssigned && (
+          <div className="shrink-0 pt-0.5">
+            <div className="flex h-5 w-5 items-center justify-center rounded-md border-2 border-green-500/50 bg-green-500/20">
+              <svg className="h-3 w-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-black text-white truncate">{source.title}</p>
+            {isAssigned && (
+              <span className="shrink-0 rounded-full bg-green-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-green-400">
+                {assignedRoleLabel ?? 'Zugewiesen'}
+              </span>
+            )}
+            {selected && !isAssigned && (
+              <span className="shrink-0 rounded-full bg-bjj-gold/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bjj-gold">
+                Ausgewaehlt
+              </span>
+            )}
+          </div>
           <p className="mt-2 text-xs text-bjj-muted">
             {source.timestamp_label ?? 'Kein Timestamp'} • {source.video_platform ?? source.provider}
           </p>
+          <p className="mt-3 line-clamp-3 text-sm text-bjj-muted">{getSourceSummary(source)}</p>
+          <div className="mt-3 flex items-center gap-3">
+            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-bjj-gold">
+              {getTechniqueCoverageLabel(source.style_coverage ?? 'both')}
+            </span>
+            <span className="text-[11px] text-bjj-muted">•</span>
+            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-bjj-muted">
+              {source.hashtags.length} Hashtags
+            </span>
+          </div>
+          <p className="mt-2 line-clamp-1 text-xs text-bjj-muted">{getReadableSourceUrl(source)}</p>
         </div>
-        <span className="rounded-full border border-bjj-border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-bjj-muted">
-          {source.hashtags.length}
-        </span>
       </div>
-      <p className="mt-3 line-clamp-3 text-sm text-bjj-muted">{getSourceSummary(source)}</p>
-      <p className="mt-3 text-[11px] font-bold uppercase tracking-[0.16em] text-bjj-gold">
-        {getTechniqueCoverageLabel(source.style_coverage ?? 'both')}
-      </p>
-      <p className="mt-3 line-clamp-1 text-xs text-bjj-muted">{getReadableSourceUrl(source)}</p>
-    </button>
+    </div>
   )
 }
 
@@ -268,11 +365,14 @@ export default function AdminOutlierDbPage() {
   const [outlierToken, setOutlierToken] = useState('')
   const [styleCoverage, setStyleCoverage] = useState<TechniqueStyleCoverage>('nogi')
   const [limit, setLimit] = useState(10)
-  const [searchTerm, setSearchTerm] = useState('')
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState('')
   const [selectedRole, setSelectedRole] = useState<ExternalSourceRole>('main_reference')
+  const [selectedContentType, setSelectedContentType] = useState<ClipContentType>('technical_demo')
+  const [selectedLearningPhase, setSelectedLearningPhase] = useState<ClipLearningPhase>('core_mechanic')
+  const [followUpNodeIds, setFollowUpNodeIds] = useState<string[]>([])
   const [mappingNotes, setMappingNotes] = useState('')
   const [recommendedArchetypeIds, setRecommendedArchetypeIds] = useState<string[]>([])
   const [sources, setSources] = useState<ImportedSource[]>([])
@@ -283,19 +383,53 @@ export default function AdminOutlierDbPage() {
   const [loadingRuns, setLoadingRuns] = useState(true)
   const [importing, setImporting] = useState(false)
   const [mapping, setMapping] = useState(false)
+  const [savingArchetypes, setSavingArchetypes] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [nodeClipGroups, setNodeClipGroups] = useState<Partial<Record<ExternalSourceRole, ImportedSource[]>>>({})
+  const [showAllScrapedVideos, setShowAllScrapedVideos] = useState(false)
+  const [sourcesFilterTerm, setSourcesFilterTerm] = useState('')
+  const [editedSummaryById, setEditedSummaryById] = useState<Record<string, string>>({})
 
   const selectedSource = useMemo(
-    () => sources.find((entry) => entry.id === selectedSourceId) ?? importSummary?.imported?.find((entry) => entry.id === selectedSourceId) ?? null,
-    [importSummary?.imported, selectedSourceId, sources]
+    () =>
+      sources.find((entry) => entry.id === selectedSourceId) ??
+      importSummary?.imported?.find((entry) => entry.id === selectedSourceId) ??
+      groupedSections.flatMap((section) => section.sources).find((entry) => entry.id === selectedSourceId) ??
+      null,
+    [groupedSections, importSummary?.imported, selectedSourceId, sources]
   )
   const selectedSourceDebug = useMemo(() => (selectedSource ? getSourceDebug(selectedSource) : null), [selectedSource])
+  const selectedSourceSummaryDraft = selectedSource
+    ? editedSummaryById[getSourceEditKey(selectedSource)] ?? getSourceSummary(selectedSource)
+    : ''
+  const selectableSourceIds = useMemo(() => {
+    const ids = [
+      ...sources,
+      ...(importSummary?.imported ?? []),
+      ...groupedSections.flatMap((section) => section.sources),
+    ]
+      .map((entry) => entry.id)
+      .filter((id): id is string => Boolean(id))
+
+    return Array.from(new Set(ids))
+  }, [groupedSections, importSummary?.imported, sources])
+  const selectedClipIds = useMemo(() => {
+    if (selectedSourceIds.length > 0) {
+      return selectedSourceIds
+    }
+
+    return selectedSourceId ? [selectedSourceId] : []
+  }, [selectedSourceId, selectedSourceIds])
 
   const selectedRun = useMemo(
     () => searchRuns.find((entry) => entry.id === selectedRunId) ?? null,
     [searchRuns, selectedRunId]
   )
+  const selectedTechnique = useMemo<TechniqueCatalogEntry | null>(() => {
+    if (!selectedNodeId) return null
+    return getTechniqueCatalogEntryById(selectedNodeId)
+  }, [selectedNodeId, customTechniques])
   const techniqueOptions = useMemo(() => {
     const combined = [
       ...getNodeTechniqueCatalog().map((entry) => ({
@@ -325,6 +459,12 @@ export default function AdminOutlierDbPage() {
       setSelectedNodeId(techniqueOptions[0]?.id ?? '')
     }
   }, [selectedNodeId, techniqueOptions])
+
+  useEffect(() => {
+    if (selectedRole !== 'related_reference' && followUpNodeIds.length > 0) {
+      setFollowUpNodeIds([])
+    }
+  }, [followUpNodeIds.length, selectedRole])
 
   useEffect(() => {
     const customTechnique = customTechniques.find((entry) => entry.id === selectedNodeId)
@@ -362,7 +502,6 @@ export default function AdminOutlierDbPage() {
 
     const runs = payload.runs ?? []
     setSearchRuns(runs)
-    setSelectedRunId((current) => current ?? runs[0]?.id ?? null)
   }
 
   async function loadSources(term = '', runId?: string | null) {
@@ -395,10 +534,103 @@ export default function AdminOutlierDbPage() {
     setSelectedSourceId(nextSections[0]?.sources[0]?.id ?? nextSources[0]?.id ?? null)
   }
 
+  async function loadNodeClipGroups(nodeId: string) {
+    if (!nodeId) {
+      setNodeClipGroups({})
+      return
+    }
+
+    const headers = await getAuthHeaders()
+    const response = await fetch(`/api/node-clips?nodeId=${encodeURIComponent(nodeId)}`, {
+      headers,
+      cache: 'no-store',
+    })
+    const payload = await parseJsonResponse<NodeClipGroupsResponse>(response)
+
+    if (!response.ok) {
+      setError(payload.error ?? 'Technik-Videos konnten nicht geladen werden.')
+      return
+    }
+
+    setNodeClipGroups(payload.groups ?? {})
+  }
+
   useEffect(() => {
     void loadSearchRuns()
-    void loadSources('', null)
   }, [])
+
+  useEffect(() => {
+    void loadNodeClipGroups(selectedNodeId)
+  }, [selectedNodeId])
+
+  useEffect(() => {
+    if (!selectedSource) return
+
+    const key = getSourceEditKey(selectedSource)
+    setEditedSummaryById((current) => {
+      if (Object.prototype.hasOwnProperty.call(current, key)) return current
+      return { ...current, [key]: getSourceSummary(selectedSource) }
+    })
+  }, [selectedSource?.id, selectedSource?.source_url])
+
+  function replaceSourceInState(nextClip: ImportedSource) {
+    setSources((current) => current.map((entry) => (entry.id === nextClip.id ? { ...entry, ...nextClip } : entry)))
+    setImportSummary((current) =>
+      current
+        ? {
+            ...current,
+            imported: current.imported?.map((entry) => (entry.id === nextClip.id ? { ...entry, ...nextClip } : entry)),
+          }
+        : current
+    )
+    setGroupedSections((current) =>
+      current.map((section) => ({
+        ...section,
+        sources: section.sources.map((entry) => (entry.id === nextClip.id ? { ...entry, ...nextClip } : entry)),
+      }))
+    )
+    setNodeClipGroups((current) => {
+      const nextGroups: Partial<Record<ExternalSourceRole, ImportedSource[]>> = {}
+      for (const [role, clips] of Object.entries(current) as Array<[ExternalSourceRole, ImportedSource[] | undefined]>) {
+        nextGroups[role] = clips?.map((entry) => (entry.id === nextClip.id ? { ...entry, ...nextClip } : entry)) ?? []
+      }
+      return nextGroups
+    })
+  }
+
+  async function saveEditedDescriptionForClip(source: ImportedSource, headers: Record<string, string>) {
+    if (!source.id) return true
+
+    const key = getSourceEditKey(source)
+    const nextSummary = editedSummaryById[key] ?? getSourceSummary(source)
+    if ((source.summary ?? '') === nextSummary.trim()) return true
+
+    const response = await fetch('/api/admin/clip-archive', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({
+        clipId: source.id,
+        summary: nextSummary,
+        hashtags: source.hashtags,
+        contentType: source.content_type,
+        learningPhase: source.learning_phase,
+        targetArchetypeIds: source.target_archetype_ids ?? [],
+      }),
+    })
+    const payload = await parseJsonResponse<{ clip?: ImportedSource; error?: string }>(response)
+
+    if (!response.ok || !payload.clip) {
+      setError(payload.error ?? 'Beschreibung konnte nicht gespeichert werden.')
+      return false
+    }
+
+    replaceSourceInState(payload.clip)
+    setEditedSummaryById((current) => ({ ...current, [key]: payload.clip?.summary ?? '' }))
+    return true
+  }
 
   async function handleImport() {
     setImporting(true)
@@ -443,20 +675,133 @@ export default function AdminOutlierDbPage() {
     await loadSearchRuns()
     if (payload.runId) {
       setSelectedRunId(payload.runId)
-      await loadSources(searchTerm, payload.runId)
-    } else {
-      await loadSources(searchTerm, null)
+      await loadSources('', payload.runId)
+      setShowAllScrapedVideos(true)
     }
   }
 
   async function handleRunSelect(runId: string) {
     setSelectedRunId(runId)
-    await loadSources(searchTerm, runId)
+    await loadSources('', runId)
+    setShowAllScrapedVideos(true)
+  }
+
+  function handleSelectSource(sourceId: string | null | undefined) {
+    if (!sourceId) return
+    setSelectedSourceId(sourceId)
+  }
+
+  function handleToggleSourceSelection(sourceId: string | null | undefined) {
+    if (!sourceId) return
+    setSelectedSourceId(sourceId)
+    setSelectedSourceIds((current) =>
+      current.includes(sourceId) ? current.filter((entry) => entry !== sourceId) : [...current, sourceId]
+    )
+  }
+
+  function handleToggleFollowUpNode(nodeId: string) {
+    setFollowUpNodeIds((current) =>
+      current.includes(nodeId) ? current.filter((entry) => entry !== nodeId) : [...current, nodeId]
+    )
   }
 
   async function handleMapSource() {
-    if (!selectedSourceId || !selectedNodeId) {
-      setError('Bitte zuerst eine Quelle und einen Node auswaehlen.')
+    if (selectedClipIds.length === 0 || !selectedNodeId) {
+      setError('Bitte zuerst mindestens eine Quelle und einen Node auswaehlen.')
+      return
+    }
+
+    const targetNodeIds =
+      selectedRole === 'related_reference'
+        ? Array.from(new Set([selectedNodeId, ...followUpNodeIds]))
+        : [selectedNodeId]
+
+    setMapping(true)
+    setError(null)
+    setSuccess(null)
+
+    const headers = await getAuthHeaders()
+
+    for (const clipId of selectedClipIds) {
+      const source = [
+        ...sources,
+        ...(importSummary?.imported ?? []),
+        ...groupedSections.flatMap((section) => section.sources),
+      ].find((entry) => entry.id === clipId)
+
+      if (source) {
+        const saved = await saveEditedDescriptionForClip(source, headers)
+        if (!saved) {
+          setMapping(false)
+          return
+        }
+      }
+
+      for (const nodeId of targetNodeIds) {
+        const response = await fetch('/api/admin/clip-archive-assignments', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: JSON.stringify({
+            clipId,
+            assignmentKind: 'node',
+            nodeId,
+            role: selectedRole,
+            contentType: selectedContentType,
+            learningPhase: selectedLearningPhase,
+            targetArchetypeIds: recommendedArchetypeIds,
+            notes: mappingNotes.trim() || null,
+          }),
+        })
+
+        const payload = await parseJsonResponse<{ error?: string }>(response)
+        if (!response.ok) {
+          setMapping(false)
+          setError(payload.error ?? 'Mapping fehlgeschlagen.')
+          return
+        }
+      }
+    }
+
+    const customTechnique = customTechniques.find((entry) => entry.id === selectedNodeId)
+    if (customTechnique) {
+      const merged = Array.from(new Set([...(customTechnique.recommendedArchetypeIds ?? []), ...recommendedArchetypeIds]))
+      updateCustomTechnique(customTechnique.id, { recommendedArchetypeIds: merged })
+    }
+
+    setMapping(false)
+    setSuccess(
+      selectedClipIds.length > 1 || targetNodeIds.length > 1
+        ? `${selectedClipIds.length} Quellen mit ${targetNodeIds.length} Technik-Slot${targetNodeIds.length === 1 ? '' : 's'} verknuepft.`
+        : 'Quelle mit Technik-Slot verknuepft.'
+    )
+    await loadNodeClipGroups(selectedNodeId)
+  }
+
+  function handleToggleRecommendedArchetype(archetypeId: string) {
+    setRecommendedArchetypeIds((current) =>
+      current.includes(archetypeId) ? current.filter((entry) => entry !== archetypeId) : [...current, archetypeId]
+    )
+  }
+
+  async function handleSaveRecommendedArchetypes() {
+    const customTechnique = customTechniques.find((entry) => entry.id === selectedNodeId)
+    if (!customTechnique) {
+      setError('Archetypen-Empfehlungen koennen aktuell nur fuer Custom-Techniken direkt gespeichert werden.')
+      return
+    }
+
+    setSavingArchetypes(true)
+    updateCustomTechnique(customTechnique.id, { recommendedArchetypeIds })
+    setSavingArchetypes(false)
+    setSuccess('Archetypen-Empfehlungen gespeichert.')
+  }
+
+  async function handleMoveAssignedClip(clip: ImportedSource, role: ExternalSourceRole) {
+    if (!clip.id || !clip.assignment_id) {
+      setError('Dieser Clip hat keine bearbeitbare Zuordnung.')
       return
     }
 
@@ -466,73 +811,89 @@ export default function AdminOutlierDbPage() {
 
     const headers = await getAuthHeaders()
     const response = await fetch('/api/admin/clip-archive-assignments', {
-      method: 'POST',
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         ...headers,
       },
       body: JSON.stringify({
-        clipId: selectedSourceId,
-        assignmentKind: 'node',
-        nodeId: selectedNodeId,
-        role: selectedRole,
-        notes: mappingNotes.trim() || null,
+        assignmentId: clip.assignment_id,
+        clipId: clip.id,
+        role,
+        contentType: selectedContentType,
+        learningPhase: selectedLearningPhase,
+        targetArchetypeIds: recommendedArchetypeIds,
       }),
     })
-
     const payload = await parseJsonResponse<{ error?: string }>(response)
     setMapping(false)
 
     if (!response.ok) {
-      setError(payload.error ?? 'Mapping fehlgeschlagen.')
+      setError(payload.error ?? 'Clip konnte nicht verschoben werden.')
       return
     }
 
-    const customTechnique = customTechniques.find((entry) => entry.id === selectedNodeId)
-    if (customTechnique) {
-      const merged = Array.from(new Set([...(customTechnique.recommendedArchetypeIds ?? []), ...recommendedArchetypeIds]))
-      updateCustomTechnique(customTechnique.id, { recommendedArchetypeIds: merged })
-    }
-
-    setSuccess('Quelle mit Technik-Slot verknuepft.')
+    setSelectedRole(role)
+    setSelectedSourceId(clip.id)
+    setSuccess(`Clip nach ${getExternalSourceRoleLabel(role)} verschoben.`)
+    await loadNodeClipGroups(selectedNodeId)
   }
+
+  const roleCards = ROLE_OPTIONS.map((role) => ({
+    ...role,
+    clips: nodeClipGroups[role.id] ?? [],
+  }))
+
+  const filteredSources = useMemo(() => {
+    if (!sourcesFilterTerm.trim()) return sources
+    const term = sourcesFilterTerm.toLowerCase()
+    return sources.filter(s => 
+      s.title.toLowerCase().includes(term) ||
+      (s.summary?.toLowerCase() ?? '').includes(term) ||
+      s.hashtags.some(h => h.toLowerCase().includes(term))
+    )
+  }, [sources, sourcesFilterTerm])
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <section className="rounded-[2rem] border border-bjj-border bg-bjj-card p-5 shadow-card">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Admin Import</p>
-          <h1 className="mt-3 font-display text-4xl font-black">OutlierDB Scraper</h1>
-          <p className="mt-3 text-sm leading-7 text-bjj-muted">
-            Zwei Suchmodi: direkte Hashtag-Suche und AI-Chat-Suche mit verlinkten Detailseiten.
-          </p>
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+      {/* 1. OutlierDB Suche - Horizontal oben */}
+      <section className="rounded-[2rem] border border-bjj-border bg-bjj-card p-6 shadow-card">
+        <div className="flex flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Admin Import</p>
+              <h1 className="mt-2 font-display text-3xl font-black">OutlierDB Scraper</h1>
+            </div>
+          </div>
+          
+          {/* Suchmodus Auswahl */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <button
               type="button"
               onClick={() => setMode('tag_search')}
-              className={`rounded-2xl px-4 py-4 text-left ${mode === 'tag_search' ? 'bg-bjj-gold text-bjj-coal' : 'bg-bjj-surface text-bjj-muted'}`}
+              className={`rounded-2xl px-4 py-4 text-left transition-colors ${mode === 'tag_search' ? 'bg-bjj-gold text-bjj-coal' : 'bg-bjj-surface text-bjj-muted hover:border-bjj-gold/30'}`}
             >
               <div className="flex items-center gap-2 text-sm font-black">
                 <Hash className="h-4 w-4" />
                 Hashtag Search
               </div>
-              <p className="mt-2 text-xs opacity-80">Nutzt `/search` direkt mit Hashtags und Pagination.</p>
+              <p className="mt-2 text-xs opacity-80">Nutzt `/search` direkt mit Hashtags.</p>
             </button>
             <button
               type="button"
               onClick={() => setMode('ai_chat')}
-              className={`rounded-2xl px-4 py-4 text-left ${mode === 'ai_chat' ? 'bg-bjj-gold text-bjj-coal' : 'bg-bjj-surface text-bjj-muted'}`}
+              className={`rounded-2xl px-4 py-4 text-left transition-colors ${mode === 'ai_chat' ? 'bg-bjj-gold text-bjj-coal' : 'bg-bjj-surface text-bjj-muted hover:border-bjj-gold/30'}`}
             >
               <div className="flex items-center gap-2 text-sm font-black">
                 <Bot className="h-4 w-4" />
                 AI Search
               </div>
-              <p className="mt-2 text-xs opacity-80">Nutzt `/chat`; ein Limit ist hier nicht relevant, weil OutlierDB die Referenzanzahl vorgibt.</p>
+              <p className="mt-2 text-xs opacity-80">Nutzt `/chat` mit AI-generierten Referenzen.</p>
             </button>
           </div>
 
-          <div className="mt-6 space-y-5">
+          {/* Suchformular - Horizontal */}
+          <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto] items-end">
             <div>
               <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Search Label</label>
               <div className="mt-2 flex items-center gap-3 rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3">
@@ -550,136 +911,243 @@ export default function AdminOutlierDbPage() {
               <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">
                 {mode === 'ai_chat' ? 'AI Prompt' : 'Import Query'}
               </label>
-              <textarea
+              <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                rows={mode === 'ai_chat' ? 4 : 2}
-                placeholder={mode === 'ai_chat' ? 'z. B. Nogi Ashi Garami mit Entries, Defense und Finishes' : 'z. B. nogi resource'}
+                placeholder={mode === 'ai_chat' ? 'z. B. Nogi Ashi Garami mit Entries' : 'z. B. nogi resource'}
                 className="mt-2 w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text outline-none"
               />
             </div>
-
-            <div>
-              <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Stil</label>
-              <select
-                value={styleCoverage}
-                onChange={(event) => setStyleCoverage(normalizeTechniqueStyleCoverage(event.target.value))}
-                className="mt-2 w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text outline-none"
-              >
-                <option value="gi">Gi</option>
-                <option value="nogi">No-Gi</option>
-                <option value="both">Gi & No-Gi</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">OutlierDB Bearer Token</label>
-              <div className="mt-2 rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3">
-                <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-bjj-muted">
-                  <KeyRound className="h-4 w-4" />
-                  Nur fuer diesen Import verwenden
-                </div>
-                <textarea
-                  value={outlierToken}
-                  onChange={(event) => setOutlierToken(event.target.value)}
-                  rows={4}
-                  placeholder="Bearer Token aus DevTools einfuegen"
-                  className="w-full bg-transparent text-sm text-bjj-text outline-none"
-                />
-              </div>
-            </div>
-
-            {mode === 'tag_search' ? (
-              <div>
-                <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Hashtags</label>
-                <textarea
-                  value={hashtagsInput}
-                  onChange={(event) => setHashtagsInput(event.target.value)}
-                  rows={4}
-                  placeholder="#nogi, #resource"
-                  className="mt-2 w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text outline-none"
-                />
-              </div>
-            ) : null}
-
-            {mode === 'tag_search' ? (
-              <div>
-                <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Limit</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={25}
-                  value={limit}
-                  onChange={(event) => setLimit(Math.min(Math.max(Number(event.target.value) || 1, 1), 25))}
-                  className="mt-2 w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text outline-none"
-                />
-              </div>
-            ) : null}
 
             <button
               type="button"
               onClick={() => void handleImport()}
               disabled={importing || !label.trim() || !query.trim() || !outlierToken.trim()}
-              className="inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-bjj-gold px-6 py-4 text-lg font-black text-bjj-coal transition-colors hover:bg-bjj-orange-light disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-bjj-gold px-6 py-3 text-sm font-black text-bjj-coal transition-colors hover:bg-bjj-orange-light disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Sparkles className="h-5 w-5" />
-              {importing ? 'Import laeuft...' : mode === 'ai_chat' ? 'AI Search importieren' : 'Hashtag Search importieren'}
+              <Sparkles className="h-4 w-4" />
+              {importing ? 'Import...' : 'Suche starten'}
             </button>
+          </div>
 
-            {success ? <div className="rounded-2xl border border-bjj-gold/20 bg-bjj-gold/10 px-4 py-3 text-sm text-bjj-text">{success}</div> : null}
-            {error ? <div className="rounded-2xl border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">{error}</div> : null}
+          {/* Erweiterte Optionen - Kollabierbar */}
+          <details className="rounded-2xl border border-bjj-border bg-bjj-surface">
+            <summary className="cursor-pointer list-none p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Erweiterte Optionen</span>
+                <ChevronDown className="h-4 w-4 text-bjj-muted" />
+              </div>
+            </summary>
+            <div className="border-t border-bjj-border p-4 space-y-4">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Stil</label>
+                  <select
+                    value={styleCoverage}
+                    onChange={(event) => setStyleCoverage(normalizeTechniqueStyleCoverage(event.target.value))}
+                    className="mt-2 w-full rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm text-bjj-text outline-none"
+                  >
+                    <option value="gi">Gi</option>
+                    <option value="nogi">No-Gi</option>
+                    <option value="both">Gi & No-Gi</option>
+                  </select>
+                </div>
 
-            {importSummary ? (
-              <div className="rounded-2xl border border-bjj-border bg-bjj-surface p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Letzter Import</p>
-                <div className="mt-3 space-y-2 text-sm text-bjj-muted">
-                  <p>Modus: {importSummary.mode ? getRunModeLabel(importSummary.mode) : 'Unbekannt'}</p>
-                  <p>Importiert: {importSummary.importedCount ?? 0}</p>
-                  <p>Gruppen: {importSummary.groupCount ?? 0}</p>
-                  <p>AI-Abschnitte: {importSummary.sections?.length ?? 0}</p>
-                  <p>Hashtags: {importSummary.hashtags?.join(', ') || 'Keine'}</p>
-                  <p>Mehr Seiten: {importSummary.hasMore ? 'Ja' : 'Nein'}</p>
-                  <p>Fehler: {importSummary.failed?.length ?? 0}</p>
+                {mode === 'tag_search' ? (
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Limit</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={25}
+                      value={limit}
+                      onChange={(event) => setLimit(Math.min(Math.max(Number(event.target.value) || 1, 1), 25))}
+                      className="mt-2 w-full rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm text-bjj-text outline-none"
+                    />
+                  </div>
+                ) : null}
+
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Bearer Token</label>
+                  <div className="mt-2 flex items-center gap-3 rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3">
+                    <KeyRound className="h-4 w-4 text-bjj-muted" />
+                    <input
+                      type="password"
+                      value={outlierToken}
+                      onChange={(event) => setOutlierToken(event.target.value)}
+                      placeholder="Token eingeben"
+                      className="w-full bg-transparent text-sm text-bjj-text outline-none"
+                    />
+                  </div>
                 </div>
               </div>
-            ) : null}
-          </div>
-        </section>
 
+              {mode === 'tag_search' ? (
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Hashtags</label>
+                  <input
+                    value={hashtagsInput}
+                    onChange={(event) => setHashtagsInput(event.target.value)}
+                    placeholder="#nogi, #resource"
+                    className="mt-2 w-full rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm text-bjj-text outline-none"
+                  />
+                </div>
+              ) : null}
+            </div>
+          </details>
+
+          {success ? <div className="rounded-2xl border border-bjj-gold/20 bg-bjj-gold/10 px-4 py-3 text-sm text-bjj-text">{success}</div> : null}
+          {error ? <div className="rounded-2xl border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300">{error}</div> : null}
+
+          {importSummary ? (
+            <div className="rounded-2xl border border-bjj-border bg-bjj-surface p-4">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Letzter Import</p>
+              <div className="mt-3 flex flex-wrap gap-4 text-sm text-bjj-muted">
+                <span>Modus: {importSummary.mode ? getRunModeLabel(importSummary.mode) : 'Unbekannt'}</span>
+                <span>Importiert: {importSummary.importedCount ?? 0}</span>
+                <span>Gruppen: {importSummary.groupCount ?? 0}</span>
+                <span>AI-Abschnitte: {importSummary.sections?.length ?? 0}</span>
+                <span>Mehr Seiten: {importSummary.hasMore ? 'Ja' : 'Nein'}</span>
+                <span>Fehler: {importSummary.failed?.length ?? 0}</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {/* 2. Letzte Suchlaeufe */}
+      <section className="rounded-[2rem] border border-bjj-border bg-bjj-card p-6 shadow-card">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Search History</p>
+            <h2 className="mt-2 text-2xl font-black text-white">Letzte Suchlaeufe</h2>
+          </div>
+          {selectedRunId && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedRunId(null)
+                setShowAllScrapedVideos(true)
+                void loadSources('', null)
+              }}
+              className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm font-semibold text-white hover:border-bjj-gold/30"
+            >
+              Alle anzeigen
+            </button>
+          )}
+        </div>
+
+        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {loadingRuns ? (
+            <>
+              <div className="h-24 rounded-2xl border border-bjj-border bg-bjj-surface shimmer" />
+              <div className="h-24 rounded-2xl border border-bjj-border bg-bjj-surface shimmer" />
+              <div className="h-24 rounded-2xl border border-bjj-border bg-bjj-surface shimmer" />
+              <div className="h-24 rounded-2xl border border-bjj-border bg-bjj-surface shimmer" />
+            </>
+          ) : null}
+          {!loadingRuns && searchRuns.length === 0 ? (
+            <div className="col-span-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-5 text-sm text-bjj-muted">
+              Noch keine Suchlaeufe gespeichert.
+            </div>
+          ) : null}
+          {searchRuns.map((run) => {
+            const active = run.id === selectedRunId
+
+            return (
+              <button
+                key={run.id}
+                type="button"
+                onClick={() => void handleRunSelect(run.id)}
+                className={`rounded-2xl border px-4 py-4 text-left transition-colors ${
+                  active ? 'border-bjj-gold/40 bg-bjj-gold/10' : 'border-bjj-border bg-bjj-surface hover:border-bjj-gold/20'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-black text-white line-clamp-1">{run.label}</p>
+                  <span className="shrink-0 rounded-full border border-bjj-border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-bjj-muted">
+                    {getRunModeLabel(run.mode)}
+                  </span>
+                </div>
+                <p className="mt-2 line-clamp-2 text-sm text-bjj-muted">{run.query ?? 'Ohne Query'}</p>
+                <p className="mt-3 text-xs text-bjj-muted">
+                  {new Date(run.created_at).toLocaleString('de-DE')} • {run.imported_count} Treffer
+                </p>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* 3. Gescrapte Videos - Nur anzeigen wenn explizit gewaehlt oder Suche aktiv */}
+      {(showAllScrapedVideos || selectedRunId) && (
         <section className="rounded-[2rem] border border-bjj-border bg-bjj-card p-6 shadow-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Imported Sources</p>
-              <h2 className="mt-2 text-3xl font-black text-white">OutlierDB Quellen</h2>
+              <h2 className="mt-2 text-2xl font-black text-white">Gescrapte Videos</h2>
               {selectedRun ? (
-                <p className="mt-2 text-sm text-bjj-muted">
+                <p className="mt-1 text-sm text-bjj-muted">
                   Aktiver Lauf: {selectedRun.label} • {getRunModeLabel(selectedRun.mode)}
                 </p>
               ) : null}
             </div>
             <div className="flex gap-3">
               <input
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Quellen filtern"
-                className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text outline-none lg:w-72"
+                value={sourcesFilterTerm}
+                onChange={(event) => setSourcesFilterTerm(event.target.value)}
+                placeholder="Videos filtern..."
+                className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text outline-none lg:w-64"
               />
               <button
                 type="button"
-                onClick={() => void loadSources(searchTerm, selectedRunId)}
-                className="rounded-2xl border border-bjj-border bg-bjj-surface px-5 py-3 text-sm font-semibold text-white"
+                onClick={() => setShowAllScrapedVideos(false)}
+                className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm font-semibold text-bjj-muted hover:text-white"
               >
-                Laden
+                Verbergen
               </button>
             </div>
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_360px]">
-            <div className="space-y-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3">
+            <span className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">
+              Auswahl: {selectedSourceIds.length}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSourceIds(selectableSourceIds)
+                if (!selectedSourceId) {
+                  setSelectedSourceId(selectableSourceIds[0] ?? null)
+                }
+              }}
+              disabled={selectableSourceIds.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl border border-bjj-border bg-bjj-card px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              <CheckSquare className="h-3.5 w-3.5" />
+              Alle sichtbaren auswaehlen
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedSourceIds([])}
+              disabled={selectedSourceIds.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl border border-bjj-border bg-bjj-card px-4 py-2 text-xs font-semibold text-bjj-muted disabled:opacity-50"
+            >
+              <Square className="h-3.5 w-3.5" />
+              Auswahl leeren
+            </button>
+            <p className="text-xs text-bjj-muted">
+              Ohne Auswahl wird der rechts geoeffnete Clip gespeichert.
+            </p>
+          </div>
+
+          <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_420px] items-start">
+            {/* Linke Spalte - Scrollbare Video-Liste */}
+            <div className="space-y-3 max-h-[calc(100vh-300px)] overflow-y-auto pr-2">
               {loadingSources ? <div className="h-32 rounded-3xl border border-bjj-border bg-bjj-surface shimmer" /> : null}
-              {!loadingSources && sources.length === 0 ? (
+              {!loadingSources && filteredSources.length === 0 ? (
                 <div className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-5 text-sm text-bjj-muted">
-                  Keine Quellen fuer diesen Suchlauf gefunden.
+                  Keine Quellen gefunden.
                 </div>
               ) : null}
 
@@ -713,7 +1181,9 @@ export default function AdminOutlierDbPage() {
                                         key={`${section.id}:${source.id ?? source.source_url}`}
                                         source={source}
                                         active={source.id === selectedSourceId}
-                                        onSelect={() => setSelectedSourceId(source.id ?? null)}
+                                        selected={Boolean(source.id && selectedSourceIds.includes(source.id))}
+                                        onSelect={() => handleSelectSource(source.id)}
+                                        onToggleSelection={() => handleToggleSourceSelection(source.id)}
                                       />
                                     ))}
                                   </div>
@@ -735,7 +1205,9 @@ export default function AdminOutlierDbPage() {
                                     <SourceCard
                                       source={source}
                                       active={source.id === selectedSourceId}
-                                      onSelect={() => setSelectedSourceId(source.id ?? null)}
+                                      selected={Boolean(source.id && selectedSourceIds.includes(source.id))}
+                                      onSelect={() => handleSelectSource(source.id)}
+                                      onToggleSelection={() => handleToggleSourceSelection(source.id)}
                                     />
                                   </div>
                                 ))}
@@ -746,17 +1218,20 @@ export default function AdminOutlierDbPage() {
                       )
                     })()
                   ))
-                : sources.map((source) => (
+                : filteredSources.map((source) => (
                     <SourceCard
                       key={source.id ?? source.source_url}
                       source={source}
                       active={source.id === selectedSourceId}
-                      onSelect={() => setSelectedSourceId(source.id ?? null)}
+                      selected={Boolean(source.id && selectedSourceIds.includes(source.id))}
+                      onSelect={() => handleSelectSource(source.id)}
+                      onToggleSelection={() => handleToggleSourceSelection(source.id)}
                     />
                   ))}
             </div>
 
-            <div className="rounded-[1.8rem] border border-bjj-border bg-bjj-surface p-5">
+            {/* Rechte Spalte - Sticky Detail-Panel */}
+            <div className="sticky top-6 rounded-[1.8rem] border border-bjj-border bg-bjj-surface p-5 max-h-[calc(100vh-200px)] overflow-y-auto">
               {!selectedSource ? (
                 <div className="rounded-2xl border border-bjj-border bg-bjj-card px-4 py-5 text-sm text-bjj-muted">
                   Waehle links eine Quelle aus.
@@ -778,7 +1253,7 @@ export default function AdminOutlierDbPage() {
                         OutlierDB oeffnen
                       </a>
                       {selectedSource.video_url ? (
-                        <a href={selectedSource.video_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-bjj-gold">
+                        <a href={getSourcePreviewUrl(selectedSource)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-bjj-gold">
                           <Link2 className="h-4 w-4" />
                           Video an exakter Stelle oeffnen
                         </a>
@@ -786,14 +1261,30 @@ export default function AdminOutlierDbPage() {
                     </div>
                   </div>
 
+                  {selectedSource.video_url ? (
+                    <div className="rounded-2xl border border-bjj-border bg-bjj-card p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Video Vorschau</p>
+                      <div className="outlierdb-mini-preview mt-3">
+                        <YoutubeEmbed
+                          title={selectedSource.title}
+                          url={getSourcePreviewUrl(selectedSource)}
+                          showHeader={false}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-bjj-border bg-bjj-card px-4 py-5 text-sm text-bjj-muted">
+                      Kein Video fuer die Vorschau erkannt.
+                    </div>
+                  )}
+
                   <div className="rounded-2xl border border-bjj-border bg-bjj-card p-4">
                     <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Metadata</p>
                     <div className="mt-3 space-y-2 text-sm text-bjj-muted">
+                      <p>Quelle: {selectedSource.video_platform ?? selectedSource.provider}</p>
                       <p>Timestamp: {selectedSource.timestamp_label ?? 'Keiner erkannt'}</p>
-                      <p>Plattform: {selectedSource.video_platform ?? 'Unbekannt'}</p>
-                      <p>Stil: {getTechniqueCoverageLabel(selectedSource.style_coverage ?? 'both')}</p>
-                      <p>Query: {selectedSource.search_query ?? 'Keine'}</p>
                       <p>Video URL: {selectedSource.video_url ?? 'Nicht erkannt'}</p>
+                      <p>Stil: {getTechniqueCoverageLabel(selectedSource.style_coverage ?? 'both')}</p>
                     </div>
                     {selectedSource.hashtags.length > 0 ? (
                       <div className="mt-4 flex flex-wrap gap-2">
@@ -804,7 +1295,20 @@ export default function AdminOutlierDbPage() {
                         ))}
                       </div>
                     ) : null}
-                    <p className="mt-4 text-sm leading-7 text-bjj-text">{getSourceSummary(selectedSource)}</p>
+                    <label className="mt-4 block text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold" htmlFor="outlierdb-description-edit">
+                      Beschreibung bearbeiten
+                    </label>
+                    <textarea
+                      id="outlierdb-description-edit"
+                      value={selectedSourceSummaryDraft}
+                      onChange={(event) =>
+                        setEditedSummaryById((current) => ({
+                          ...current,
+                          [getSourceEditKey(selectedSource)]: event.target.value,
+                        }))
+                      }
+                      className="mt-2 min-h-32 w-full resize-y rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm leading-7 text-bjj-text outline-none focus:border-bjj-gold/60"
+                    />
                   </div>
 
                   <details className="rounded-2xl border border-bjj-border bg-bjj-card p-4">
@@ -856,6 +1360,7 @@ export default function AdminOutlierDbPage() {
                     </div>
                   </details>
 
+                  {/* Mapping Panel */}
                   <div className="rounded-2xl border border-bjj-border bg-bjj-card p-4">
                     <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">
                       <Database className="h-4 w-4" />
@@ -889,8 +1394,78 @@ export default function AdminOutlierDbPage() {
                           ))}
                         </div>
 
+                        {selectedRole === 'related_reference' ? (
+                          <div className="rounded-2xl border border-bjj-border bg-bjj-surface p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">Follow-up Zielnodes</p>
+                                <p className="mt-2 text-sm text-bjj-muted">
+                                  Optional: Wenn der Follow-up-Clip fuer weitere Techniken gelten soll, markiere sie hier. Ohne Auswahl bleibt er allgemein beim oben gewaehlten Node.
+                                </p>
+                              </div>
+                              <span className="rounded-full border border-bjj-border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-bjj-muted">
+                                {followUpNodeIds.length}
+                              </span>
+                            </div>
+                            <div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
+                              {techniqueOptions
+                                .filter((technique) => technique.id !== selectedNodeId)
+                                .map((technique) => {
+                                  const active = followUpNodeIds.includes(technique.id)
+                                  return (
+                                    <button
+                                      key={technique.id}
+                                      type="button"
+                                      onClick={() => handleToggleFollowUpNode(technique.id)}
+                                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
+                                        active ? 'border-bjj-gold bg-bjj-gold/10 text-white' : 'border-bjj-border bg-bjj-card text-bjj-muted'
+                                      }`}
+                                    >
+                                      <span className="font-semibold">{technique.title}</span>
+                                      <span className="ml-2 text-xs text-bjj-muted">{technique.subtitle}</span>
+                                    </button>
+                                  )
+                                })}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="grid gap-3 rounded-2xl border border-bjj-border bg-bjj-surface p-4 md:grid-cols-2">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">Clip-Art</p>
+                            <p className="mt-2 text-sm text-bjj-muted">Was passiert in diesem Video?</p>
+                            <select
+                              value={selectedContentType}
+                              onChange={(event) => setSelectedContentType(event.target.value as ClipContentType)}
+                              className="mt-3 w-full rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm text-bjj-text outline-none"
+                            >
+                              {CLIP_CONTENT_TYPES.map((type) => (
+                                <option key={type} value={type}>
+                                  {getClipContentTypeLabel(type)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">Lernphase</p>
+                            <p className="mt-2 text-sm text-bjj-muted">Wann soll der Algorithmus den Clip eher zeigen?</p>
+                            <select
+                              value={selectedLearningPhase}
+                              onChange={(event) => setSelectedLearningPhase(event.target.value as ClipLearningPhase)}
+                              className="mt-3 w-full rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm text-bjj-text outline-none"
+                            >
+                              {CLIP_LEARNING_PHASES.map((phase) => (
+                                <option key={phase} value={phase}>
+                                  {getClipLearningPhaseLabel(phase)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
                         <div className="space-y-2">
-                          <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">Empfohlene Archetypen</p>
+                          <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">Geeignete Koerpertypen / Archetypen</p>
                           <div className="grid gap-2 sm:grid-cols-2">
                             {ARCHETYPES.map((archetype) => {
                               const active = recommendedArchetypeIds.includes(archetype.id)
@@ -898,13 +1473,7 @@ export default function AdminOutlierDbPage() {
                                 <button
                                   key={archetype.id}
                                   type="button"
-                                  onClick={() =>
-                                    setRecommendedArchetypeIds((current) =>
-                                      current.includes(archetype.id)
-                                        ? current.filter((entry) => entry !== archetype.id)
-                                        : [...current, archetype.id]
-                                    )
-                                  }
+                                  onClick={() => handleToggleRecommendedArchetype(archetype.id)}
                                   className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold ${
                                     active ? 'bg-bjj-gold text-bjj-coal' : 'bg-bjj-surface text-bjj-muted'
                                   }`}
@@ -914,13 +1483,22 @@ export default function AdminOutlierDbPage() {
                               )
                             })}
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleSaveRecommendedArchetypes()}
+                            disabled={savingArchetypes}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm font-semibold text-white transition hover:border-bjj-gold/30 hover:text-bjj-gold disabled:opacity-60"
+                          >
+                            <Save className="h-4 w-4" />
+                            {savingArchetypes ? 'Speichert...' : 'Archetypen-Empfehlungen speichern'}
+                          </button>
                         </div>
 
                       <textarea
                         value={mappingNotes}
                         onChange={(event) => setMappingNotes(event.target.value)}
                         rows={4}
-                        placeholder="Optional: kurze Technik fuer diese Verknuepfung"
+                        placeholder="Optional: kurze Notiz fuer diese Verknuepfung"
                         className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text outline-none"
                       />
 
@@ -931,72 +1509,144 @@ export default function AdminOutlierDbPage() {
                         className="inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-bjj-gold px-6 py-4 text-base font-black text-bjj-coal transition-colors hover:bg-bjj-orange-light disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <CheckCircle2 className="h-5 w-5" />
-                        {mapping ? 'Verknuepfe...' : 'Mit Technik verknuepfen'}
+                        {mapping ? 'Verknuepfe...' : `${selectedClipIds.length} Clip${selectedClipIds.length === 1 ? '' : 's'} verknuepfen`}
                       </button>
                     </div>
+                  </div>
+
+                  {/* Technik-Kontext */}
+                  <div className="rounded-2xl border border-bjj-border bg-bjj-card p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Technik-Kontext</p>
+                    {!selectedTechnique ? (
+                      <p className="mt-3 text-sm text-bjj-muted">Keine Technik ausgewaehlt.</p>
+                    ) : (
+                      <div className="mt-4 space-y-5">
+                        <div>
+                          <p className="text-sm font-black text-white">{selectedTechnique.title}</p>
+                          <p className="mt-1 text-sm text-bjj-muted">{selectedTechnique.subtitle}</p>
+                          <p className="mt-3 text-sm leading-7 text-bjj-text">{selectedTechnique.description}</p>
+                          {recommendedArchetypeIds.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {recommendedArchetypeIds.map((id) => {
+                                const archetype = ARCHETYPES.find((entry) => entry.id === id)
+                                return archetype ? (
+                                  <span key={id} className="rounded-full border border-bjj-border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-bjj-gold">
+                                    {archetype.name}
+                                  </span>
+                                ) : null
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div>
+                          <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">
+                            <Play className="h-4 w-4" />
+                            Technik-eigene Videos ({selectedTechnique.videos.length})
+                          </p>
+                          {selectedTechnique.videos.length === 0 ? (
+                            <p className="mt-3 text-sm text-bjj-muted">In der Technik selbst sind aktuell noch keine direkten Videos hinterlegt.</p>
+                          ) : (
+                            <div className="mt-3 space-y-2">
+                              {selectedTechnique.videos.map((video) => (
+                                <a
+                                  key={video.id}
+                                  href={video.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 transition hover:border-bjj-gold/30"
+                                >
+                                  <p className="text-sm font-semibold text-white">{video.title}</p>
+                                  <p className="mt-1 text-xs text-bjj-muted">{video.platform}</p>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-4">
+                          {roleCards.map((role) => (
+                            <div key={role.id} className="rounded-2xl border border-bjj-border bg-bjj-surface p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-bjj-gold">{role.label}</p>
+                                <span className="rounded-full border border-bjj-border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-bjj-muted">
+                                  {role.clips.length}
+                                </span>
+                              </div>
+                              {role.clips.length === 0 ? (
+                                <p className="mt-3 text-sm text-bjj-muted">
+                                  {role.id === 'related_reference'
+                                    ? 'Noch keine Follow-Up-Videos verknuepft.'
+                                    : 'Noch keine zugeordneten Videos in diesem Bereich.'}
+                                </p>
+                              ) : (
+                                <div className="mt-3 space-y-2">
+                                  {role.clips.map((clip) => (
+                                    <button
+                                      key={clip.id ?? clip.source_url}
+                                      type="button"
+                                      onClick={() => setSelectedSourceId(clip.id ?? null)}
+                                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                                        clip.id === selectedSourceId ? 'border-bjj-gold/40 bg-bjj-gold/10' : 'border-bjj-border bg-bjj-card hover:border-bjj-gold/20'
+                                      }`}
+                                    >
+                                      <p className="text-sm font-semibold text-white">{clip.title}</p>
+                                      <p className="mt-1 text-xs text-bjj-muted">{clip.timestamp_label ?? 'Kein Timestamp'} • {clip.video_platform ?? clip.provider}</p>
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        <span className="rounded-full border border-bjj-border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bjj-gold">
+                                          {getClipLearningPhaseLabel(clip.learning_phase)}
+                                        </span>
+                                        <span className="rounded-full border border-bjj-border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bjj-muted">
+                                          {getClipContentTypeLabel(clip.content_type)}
+                                        </span>
+                                        {clip.target_archetype_ids?.length ? (
+                                          <span className="rounded-full border border-bjj-border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bjj-muted">
+                                            {clip.target_archetype_ids.length} Typen
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <p className="mt-2 line-clamp-2 text-sm text-bjj-muted">{getSourceSummary(clip)}</p>
+                                      {clip.assignment_id ? (
+                                        <div className="mt-3 flex flex-wrap gap-2 border-t border-bjj-border pt-3">
+                                          {ROLE_OPTIONS.filter((targetRole) => targetRole.id !== role.id).map((targetRole) => (
+                                            <span
+                                              key={targetRole.id}
+                                              role="button"
+                                              tabIndex={0}
+                                              onClick={(event) => {
+                                                event.stopPropagation()
+                                                void handleMoveAssignedClip(clip, targetRole.id)
+                                              }}
+                                              onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                  event.preventDefault()
+                                                  event.stopPropagation()
+                                                  void handleMoveAssignedClip(clip, targetRole.id)
+                                                }
+                                              }}
+                                              className="rounded-full border border-bjj-border bg-bjj-surface px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-bjj-muted transition hover:border-bjj-gold/40 hover:text-bjj-gold"
+                                            >
+                                              Nach {targetRole.label}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
             </div>
           </div>
         </section>
-      </div>
-
-      <section className="rounded-[2rem] border border-bjj-border bg-bjj-card p-6 shadow-card">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Search History</p>
-            <h2 className="mt-2 text-3xl font-black text-white">Letzte Suchlaeufe</h2>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedRunId(null)
-              void loadSources(searchTerm, null)
-            }}
-            className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm font-semibold text-white"
-          >
-            Alle Quellen
-          </button>
-        </div>
-
-        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {loadingRuns ? <div className="h-24 rounded-3xl border border-bjj-border bg-bjj-surface shimmer" /> : null}
-          {!loadingRuns && searchRuns.length === 0 ? (
-            <div className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-5 text-sm text-bjj-muted">
-              Noch keine Suchlaeufe gespeichert.
-            </div>
-          ) : null}
-          {searchRuns.map((run) => {
-            const active = run.id === selectedRunId
-
-            return (
-              <button
-                key={run.id}
-                type="button"
-                onClick={() => void handleRunSelect(run.id)}
-                className={`rounded-2xl border px-4 py-4 text-left transition-colors ${
-                  active ? 'border-bjj-gold/40 bg-bjj-gold/10' : 'border-bjj-border bg-bjj-surface hover:border-bjj-gold/20'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-black text-white">{run.label}</p>
-                  <span className="rounded-full border border-bjj-border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-bjj-muted">
-                    {getRunModeLabel(run.mode)}
-                  </span>
-                </div>
-                <p className="mt-2 line-clamp-2 text-sm text-bjj-muted">{run.query ?? 'Ohne Query'}</p>
-                <p className="mt-3 text-xs text-bjj-muted">
-                  {new Date(run.created_at).toLocaleString('de-DE')} • {run.imported_count} Treffer
-                </p>
-                {run.hashtags.length > 0 ? (
-                  <p className="mt-2 line-clamp-1 text-xs text-bjj-muted">{run.hashtags.join(', ')}</p>
-                ) : null}
-              </button>
-            )
-          })}
-        </div>
-      </section>
+      )}
     </div>
   )
 }

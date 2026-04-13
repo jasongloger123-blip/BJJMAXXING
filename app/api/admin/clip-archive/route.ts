@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { isAdminEmail } from '@/lib/admin-access'
+import { normalizeClipHashtags } from '@/lib/clip-archive'
+import { normalizeClipContentType, normalizeClipLearningPhase } from '@/lib/clip-taxonomy'
+import { detectVideoFormat, getVideoPlatform } from '@/lib/video-format'
 
 async function resolveAdmin(request: Request) {
   const supabase = createClient()
@@ -45,14 +48,34 @@ export async function GET(request: Request) {
   const query = searchParams.get('query')?.trim()?.toLowerCase()
   const status = searchParams.get('status')?.trim()
   const limit = Math.min(Math.max(Number(searchParams.get('limit') ?? 100), 1), 200)
+  let runExternalSourceIds: string[] = []
+
+  if (runId) {
+    const { data: runSourceRows, error: runSourceError } = await admin
+      .from('external_technique_search_run_sources')
+      .select('external_source_id')
+      .eq('run_id', runId)
+
+    if (runSourceError) {
+      return NextResponse.json({ error: runSourceError.message }, { status: 500 })
+    }
+
+    runExternalSourceIds = (runSourceRows ?? [])
+      .map((row) => row.external_source_id)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+  }
 
   let builder = admin
     .from('clip_archive')
-    .select('id, external_source_id, source_run_id, provider, source_url, source_type, title, video_url, video_platform, video_format, style_coverage, timestamp_label, timestamp_seconds, hashtags, summary, search_query, raw_payload, assignment_status, created_at, last_seen_at')
+    .select('id, external_source_id, source_run_id, provider, source_url, source_type, title, video_url, video_platform, video_format, style_coverage, content_type, learning_phase, target_archetype_ids, timestamp_label, timestamp_seconds, hashtags, summary, search_query, raw_payload, assignment_status, created_at, last_seen_at')
     .order('last_seen_at', { ascending: false })
     .limit(limit)
 
-  if (runId) builder = builder.eq('source_run_id', runId)
+  if (runId && runExternalSourceIds.length > 0) {
+    builder = builder.in('external_source_id', runExternalSourceIds)
+  } else if (runId) {
+    builder = builder.eq('source_run_id', runId)
+  }
   if (status) builder = builder.eq('assignment_status', status)
 
   const { data, error } = await builder
@@ -61,7 +84,28 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const clips = (data ?? []).filter((clip) =>
+  // Load assignments for clips to check which ones are already assigned
+  const clipIds = (data ?? []).map((clip) => clip.id).filter((id): id is string => Boolean(id))
+  let assignmentsMap = new Map<string, { id: string; role: string }>()
+  
+  if (clipIds.length > 0) {
+    const { data: assignmentsData } = await admin
+      .from('node_external_sources')
+      .select('id, external_source_id, role')
+      .in('external_source_id', clipIds)
+    
+    for (const assignment of assignmentsData ?? []) {
+      if (assignment.external_source_id) {
+        assignmentsMap.set(assignment.external_source_id, { id: assignment.id, role: assignment.role })
+      }
+    }
+  }
+
+  const clips = (data ?? []).map((clip) => ({
+    ...clip,
+    assignment_id: assignmentsMap.get(clip.id)?.id ?? null,
+    assignment_role: assignmentsMap.get(clip.id)?.role ?? null,
+  })).filter((clip) =>
     query ? [clip.title, clip.summary, clip.search_query].join(' ').toLowerCase().includes(query) : true
   )
 
@@ -134,4 +178,165 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({ clips, sections })
+}
+
+export async function POST(request: Request) {
+  const { user, admin } = await resolveAdmin(request)
+
+  if (!user || !isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Kein Admin-Zugriff.' }, { status: 403 })
+  }
+
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin-Client nicht konfiguriert.' }, { status: 500 })
+  }
+
+  const body = (await request.json()) as {
+    url?: string
+    title?: string | null
+    summary?: string | null
+    hashtags?: string[] | string | null
+    contentType?: string | null
+    learningPhase?: string | null
+    targetArchetypeIds?: string[] | null
+    loopSeconds?: number | null
+  }
+
+  const url = body.url?.trim()
+  if (!url) {
+    return NextResponse.json({ error: 'Video-URL fehlt.' }, { status: 400 })
+  }
+
+  try {
+    const parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return NextResponse.json({ error: 'Bitte eine gueltige http(s)-URL angeben.' }, { status: 400 })
+    }
+  } catch {
+    return NextResponse.json({ error: 'Bitte eine gueltige Video-URL angeben.' }, { status: 400 })
+  }
+
+  const title = body.title?.trim() || 'Manuell importierter Clip'
+  const summary = body.summary?.trim() || null
+  const hashtags = normalizeClipHashtags(body.hashtags)
+  const videoFormat = detectVideoFormat(url)
+  const videoPlatform = getVideoPlatform(videoFormat)
+  const targetArchetypeIds = Array.isArray(body.targetArchetypeIds)
+    ? body.targetArchetypeIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : []
+  const loopSeconds =
+    typeof body.loopSeconds === 'number' && Number.isFinite(body.loopSeconds)
+      ? Math.min(Math.max(Math.round(body.loopSeconds), 8), 300)
+      : null
+
+  const { data: existingBySourceUrl, error: existingBySourceError } = await admin
+    .from('clip_archive')
+    .select('id, external_source_id, source_run_id, provider, source_url, source_type, title, video_url, video_platform, video_format, style_coverage, content_type, learning_phase, target_archetype_ids, timestamp_label, timestamp_seconds, hashtags, summary, search_query, raw_payload, assignment_status, created_at, last_seen_at')
+    .eq('source_url', url)
+    .maybeSingle()
+
+  if (existingBySourceError) {
+    return NextResponse.json({ error: existingBySourceError.message }, { status: 500 })
+  }
+
+  const { data: existingByVideoUrl, error: existingByVideoError } = existingBySourceUrl
+    ? { data: null, error: null }
+    : await admin
+        .from('clip_archive')
+        .select('id, external_source_id, source_run_id, provider, source_url, source_type, title, video_url, video_platform, video_format, style_coverage, content_type, learning_phase, target_archetype_ids, timestamp_label, timestamp_seconds, hashtags, summary, search_query, raw_payload, assignment_status, created_at, last_seen_at')
+        .eq('video_url', url)
+        .maybeSingle()
+
+  if (existingByVideoError) {
+    return NextResponse.json({ error: existingByVideoError.message }, { status: 500 })
+  }
+
+  const existingClip = existingBySourceUrl ?? existingByVideoUrl
+  if (existingClip) {
+    return NextResponse.json({ clip: existingClip, existing: true })
+  }
+
+  const { data, error } = await admin
+    .from('clip_archive')
+    .insert({
+      provider: 'manual_admin',
+      source_url: url,
+      source_type: 'video',
+      title,
+      video_url: url,
+      video_platform: videoPlatform,
+      video_format: videoFormat,
+      content_type: normalizeClipContentType(body.contentType),
+      learning_phase: normalizeClipLearningPhase(body.learningPhase),
+      target_archetype_ids: targetArchetypeIds,
+      hashtags,
+      summary,
+      search_query: null,
+      raw_payload: {
+        import_source: 'admin_video_upload',
+        loop_seconds: loopSeconds,
+        submitted_by: user.email ?? user.id,
+      },
+      assignment_status: 'unassigned',
+      last_seen_at: new Date().toISOString(),
+    })
+    .select('id, external_source_id, source_run_id, provider, source_url, source_type, title, video_url, video_platform, video_format, style_coverage, content_type, learning_phase, target_archetype_ids, timestamp_label, timestamp_seconds, hashtags, summary, search_query, raw_payload, assignment_status, created_at, last_seen_at')
+    .single()
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ clip: data, existing: false }, { status: 201 })
+}
+
+export async function PATCH(request: Request) {
+  const { user, admin } = await resolveAdmin(request)
+
+  if (!user || !isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Kein Admin-Zugriff.' }, { status: 403 })
+  }
+
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin-Client nicht konfiguriert.' }, { status: 500 })
+  }
+
+  const body = (await request.json()) as {
+    clipId?: string
+    summary?: string | null
+    hashtags?: string[] | string | null
+    contentType?: string | null
+    learningPhase?: string | null
+    targetArchetypeIds?: string[] | null
+  }
+
+  if (!body.clipId) {
+    return NextResponse.json({ error: 'clipId fehlt.' }, { status: 400 })
+  }
+
+  const summary = typeof body.summary === 'string' ? body.summary.trim() : null
+  const hashtags = normalizeClipHashtags(body.hashtags)
+  const targetArchetypeIds = Array.isArray(body.targetArchetypeIds)
+    ? body.targetArchetypeIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : []
+
+  const { data, error } = await admin
+    .from('clip_archive')
+    .update({
+      summary: summary || null,
+      hashtags,
+      content_type: normalizeClipContentType(body.contentType),
+      learning_phase: normalizeClipLearningPhase(body.learningPhase),
+      target_archetype_ids: targetArchetypeIds,
+      last_seen_at: new Date().toISOString(),
+    })
+    .eq('id', body.clipId)
+    .select('id, external_source_id, source_run_id, provider, source_url, source_type, title, video_url, video_platform, video_format, style_coverage, content_type, learning_phase, target_archetype_ids, timestamp_label, timestamp_seconds, hashtags, summary, search_query, raw_payload, assignment_status, created_at, last_seen_at')
+    .maybeSingle()
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ clip: data })
 }

@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import PublicAuthShell from '@/components/PublicAuthShell'
 import { readPendingArchetypeResult } from '@/lib/public-archetype-result'
+import { waitForAuthenticatedUser } from '@/lib/supabase/auth-guard'
 
 function getSafeNextPath(next: string | null) {
   if (!next || !next.startsWith('/')) {
@@ -46,24 +47,39 @@ function RegisterPageContent() {
       return
     }
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const { error: loginError } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password: password.trim(),
     })
 
-    if (signInError) {
-      setError(signInError.message)
+    if (loginError) {
+      setError(loginError.message ?? 'Login nach Registrierung fehlgeschlagen.')
       setLoading(false)
       return
     }
 
+    await supabase.auth.getSession()
+    await waitForAuthenticatedUser(supabase, 8, 250)
+
     const pendingResult = readPendingArchetypeResult()
 
     if (pendingResult) {
+      // Speichere die Archetypen direkt im Profil
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('user_profiles').upsert({
+          id: user.id,
+          email: user.email,
+          primary_archetype: pendingResult.primary.id,
+          secondary_archetype: pendingResult.secondary.id,
+        })
+      }
+      // Leite zum Archetyp-Ergebnis mit Namensabfrage
       window.location.assign('/archetype-result')
       return
     }
 
+    // Bei neuer Registrierung ohne Archetyp-Test zur Startseite
     window.location.assign(nextPath)
   }
 
@@ -71,15 +87,15 @@ function RegisterPageContent() {
     <PublicAuthShell
       title={
         <>
-          Warrior <span className="text-[#00f2ff]">werden</span>
+          Warrior <span className="text-bjj-orange">werden</span>
         </>
       }
       subtitle="Erstelle dein Konto und starte dein Training."
-      accent="blue"
+      accent="orange"
       footer={
-        <p className="text-xs font-bold text-slate-500 transition-colors">
+        <p className="text-xs font-bold text-bjj-muted transition-colors">
           Bereits angemeldet?{' '}
-          <Link href={nextPath === '/' ? '/login' : `/login?next=${encodeURIComponent(nextPath)}`} className="text-white hover:text-[#00f2ff]">
+          <Link href={nextPath === '/' ? '/login' : `/login?next=${encodeURIComponent(nextPath)}`} className="text-white hover:text-bjj-orange">
             Zum Login
           </Link>
         </p>
@@ -87,7 +103,7 @@ function RegisterPageContent() {
     >
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+          <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.2em] text-bjj-muted">
             Email Adresse
           </label>
           <input
@@ -96,11 +112,11 @@ function RegisterPageContent() {
             onChange={(event) => setEmail(event.target.value)}
             required
             placeholder="deine@email.de"
-            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none transition-all sm:px-6 sm:py-4"
+            className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-white outline-none transition-all placeholder:text-white/40 focus:border-bjj-orange sm:px-6 sm:py-4"
           />
         </div>
         <div>
-          <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+          <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.2em] text-bjj-muted">
             Passwort
           </label>
           <input
@@ -110,7 +126,7 @@ function RegisterPageContent() {
             required
             minLength={6}
             placeholder="Mindestens 6 Zeichen"
-            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 outline-none transition-all sm:px-6 sm:py-4"
+            className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-white outline-none transition-all placeholder:text-white/40 focus:border-bjj-orange sm:px-6 sm:py-4"
           />
         </div>
         {error ? (
@@ -121,7 +137,7 @@ function RegisterPageContent() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-2xl bg-[#00f2ff] py-4 text-lg font-black text-[#0a0118] shadow-[0_0_20px_rgba(0,242,255,0.3)] transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60 sm:py-5 sm:text-xl"
+          className="w-full rounded-2xl bg-bjj-orange py-4 text-lg font-black text-white shadow-orange-glow transition-all hover:scale-[1.02] hover:bg-bjj-orange-light disabled:cursor-not-allowed disabled:opacity-60 sm:py-5 sm:text-xl"
         >
           {loading ? 'Registriert...' : 'REGISTRIEREN'}
         </button>

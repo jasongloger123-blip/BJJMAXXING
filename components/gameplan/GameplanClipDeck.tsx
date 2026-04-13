@@ -96,12 +96,19 @@ export function GameplanClipDeck({ clips, detailHref, detailCtaLabel }: Gameplan
   const clip = clips[activeIndex] ?? null
   const hashtags = useMemo(() => (clip ? buildHashtags(clip) : []), [clip])
   const isSaved = clip ? savedClipIds.includes(clip.id) : false
+  const activeInstagramEmbedUrl = useMemo(() => (clip ? extractInstagramEmbedUrl(clip.sourceUrl) : null), [clip])
 
   useEffect(() => {
     if (shareFeedback !== 'copied') return
     const timeout = window.setTimeout(() => setShareFeedback('idle'), 1800)
     return () => window.clearTimeout(timeout)
   }, [shareFeedback])
+
+  useEffect(() => {
+    if (!activeInstagramEmbedUrl) return
+    const timeout = window.setTimeout(() => setRestartNonce((value) => value + 1), 35000)
+    return () => window.clearTimeout(timeout)
+  }, [activeInstagramEmbedUrl, restartNonce])
 
   if (!clip) {
     return null
@@ -110,7 +117,7 @@ export function GameplanClipDeck({ clips, detailHref, detailCtaLabel }: Gameplan
   const canGoPrev = activeIndex > 0
   const canGoNext = activeIndex < clips.length - 1
   const youtubeEmbedUrl = buildYoutubeEmbedUrl(clip.sourceUrl, muted, clip.clipWindow)
-  const instagramEmbedUrl = extractInstagramEmbedUrl(clip.sourceUrl)
+  const instagramEmbedUrl = activeInstagramEmbedUrl
   const isPortrait = isPortraitVideoFormat(clip.videoFormat)
   const formatLabel = getVideoFormatLabel(clip.videoFormat)
 
@@ -138,7 +145,6 @@ export function GameplanClipDeck({ clips, detailHref, detailCtaLabel }: Gameplan
       <div className={`clip-embed-shell ${isPortrait ? 'clip-embed-shell-portrait' : 'clip-embed-shell-landscape'}`}>
         <div className="clip-embed-titlebar">
           <span className="clip-embed-format-badge">{formatLabel}</span>
-          <p className="clip-embed-title">{clip.title}</p>
         </div>
 
         <div className={`clip-embed-media ${isPortrait ? 'clip-embed-media-portrait' : 'clip-embed-media-landscape'}`}>
@@ -251,6 +257,10 @@ export function GameplanClipDeck({ clips, detailHref, detailCtaLabel }: Gameplan
         </div>
       </div>
 
+      <div className="px-4 pt-1">
+        <p className="text-base font-bold text-white">{clip.title}</p>
+      </div>
+
       {hashtags.length > 0 ? (
         <div className="px-4 py-3">
           <div className="flex flex-wrap gap-2">
@@ -266,15 +276,6 @@ export function GameplanClipDeck({ clips, detailHref, detailCtaLabel }: Gameplan
           </div>
         </div>
       ) : null}
-
-      <div className="px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/46">
-          <span>{formatLabel}</span>
-          <span>{clip.levelLabel}</span>
-          <span>{clip.category}</span>
-        </div>
-        <p className="mt-3 text-sm leading-6 text-white/72">{clip.description}</p>
-      </div>
 
       <div className="px-4 py-3">
         <div className="flex flex-wrap gap-2">
@@ -294,14 +295,6 @@ export function GameplanClipDeck({ clips, detailHref, detailCtaLabel }: Gameplan
               {detailCtaLabel}
             </Link>
           ) : null}
-          <a
-            href={clip.sourceUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-bjj-gold/10 px-4 py-2.5 text-sm font-semibold text-bjj-gold transition hover:bg-bjj-gold/15"
-          >
-            Video oeffnen
-          </a>
         </div>
       </div>
     </div>

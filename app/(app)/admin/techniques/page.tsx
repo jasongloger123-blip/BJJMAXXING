@@ -5,9 +5,13 @@ import Link from 'next/link'
 import { AlertTriangle, Check, Edit3, Eye, ImagePlus, Info, Play, Plus, Search, Shield, Target, Trash2, X } from 'lucide-react'
 import type { TechniqueStage } from '@/components/technique-library/types'
 import { ARCHETYPES } from '@/lib/archetypes'
+import { normalizeHashtags } from '@/lib/external-technique-sources'
 import {
   CUSTOM_TECHNIQUES_EVENT,
   deleteCustomTechnique,
+  getTechniqueVideoOrientationLabel,
+  getTechniqueVideoTypeLabel,
+  inferTechniqueVideoType,
   readCustomTechniques,
   updateCustomTechnique,
   writeCustomTechniques,
@@ -15,20 +19,55 @@ import {
   type TechniqueCounter,
   type TechniqueDrill,
   type TechniqueStyleContent,
+  type TechniqueTaggedNote,
   type TechniqueStyleOverrides,
   type TechniqueVideo,
+  type TechniqueVideoType,
 } from '@/lib/custom-techniques'
 import { getTechniqueCoverageLabel, getTechniqueStyleLabel, type TechniqueStyle, type TechniqueStyleCoverage } from '@/lib/technique-style'
 import { uploadTechniqueImage } from '@/lib/supabase/storage'
+import {
+  CLIP_CONTENT_TYPES,
+  CLIP_LEARNING_PHASES,
+  getClipContentTypeLabel,
+  getClipLearningPhaseLabel,
+  type ClipContentType,
+  type ClipLearningPhase,
+} from '@/lib/clip-taxonomy'
 
 type TabId = 'basic' | 'videos' | 'counters' | 'drills' | 'keypoints' | 'errors'
 type ContentMode = 'shared' | TechniqueStyle
 
 const STAGE_LABELS: Record<TechniqueStage, string> = { position: 'Position', pass: 'Pass', submission: 'Submission' }
 const COVERAGE_OPTIONS: TechniqueStyleCoverage[] = ['gi', 'nogi', 'both']
+const VIDEO_TYPE_OPTIONS: TechniqueVideoType[] = ['youtube', 'youtube_short', 'instagram_reel', 'tiktok']
 
 function getItemStyleLabel(styleCoverage: TechniqueStyleCoverage) {
   return getTechniqueCoverageLabel(styleCoverage)
+}
+
+function detectVideoPlatform(videoType: TechniqueVideoType): TechniqueVideo['platform'] {
+  if (videoType === 'youtube' || videoType === 'youtube_short') return 'youtube'
+  if (videoType === 'instagram_reel') return 'instagram'
+  return 'other'
+}
+
+function createEmptyVideoDraft() {
+  return {
+    title: '',
+    url: '',
+    platform: 'youtube' as TechniqueVideo['platform'],
+    videoType: 'youtube' as TechniqueVideoType,
+    contentType: 'technical_demo' as ClipContentType,
+    learningPhase: 'core_mechanic' as ClipLearningPhase,
+    targetArchetypeIds: [] as string[],
+    description: '',
+    hashtags: [] as string[],
+  }
+}
+
+function formatHashtagInput(hashtags?: string[]) {
+  return hashtags?.length ? hashtags.map((tag) => `#${tag}`).join(', ') : ''
 }
 
 function emptyOverrides(): TechniqueStyleOverrides {
@@ -73,11 +112,11 @@ export default function AdminTechniquesPage() {
   const [videos, setVideos] = useState<TechniqueVideo[]>([])
   const [counters, setCounters] = useState<TechniqueCounter[]>([])
   const [drills, setDrills] = useState<TechniqueDrill[]>([])
-  const [keyPoints, setKeyPoints] = useState<string[]>([])
-  const [commonErrors, setCommonErrors] = useState<string[]>([])
+  const [keyPoints, setKeyPoints] = useState<TechniqueTaggedNote[]>([])
+  const [commonErrors, setCommonErrors] = useState<TechniqueTaggedNote[]>([])
   const [prerequisites, setPrerequisites] = useState<string[]>([])
   const [recommendedArchetypeIds, setRecommendedArchetypeIds] = useState<string[]>([])
-  const [newVideo, setNewVideo] = useState({ title: '', url: '', platform: 'youtube' as TechniqueVideo['platform'] })
+  const [newVideo, setNewVideo] = useState(createEmptyVideoDraft)
   const [newCounter, setNewCounter] = useState<{ title: string; description: string; styleCoverage: TechniqueStyleCoverage }>({
     title: '',
     description: '',
@@ -89,8 +128,8 @@ export default function AdminTechniquesPage() {
     duration: '',
     styleCoverage: 'both',
   })
-  const [newKeyPoint, setNewKeyPoint] = useState('')
-  const [newError, setNewError] = useState('')
+  const [newKeyPoint, setNewKeyPoint] = useState({ text: '', styleCoverage: 'both' as TechniqueStyleCoverage })
+  const [newError, setNewError] = useState({ text: '', styleCoverage: 'both' as TechniqueStyleCoverage })
   const [newPrerequisite, setNewPrerequisite] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -262,8 +301,10 @@ export default function AdminTechniquesPage() {
   const setCurrentVideos = (value: TechniqueVideo[]) => (contentMode === 'shared' ? setVideos(value) : setOverridePatch({ videos: value }))
   const setCurrentCounters = (value: TechniqueCounter[]) => (contentMode === 'shared' ? setCounters(value) : setOverridePatch({ counters: value }))
   const setCurrentDrills = (value: TechniqueDrill[]) => (contentMode === 'shared' ? setDrills(value) : setOverridePatch({ drills: value }))
-  const setCurrentKeyPoints = (value: string[]) => (contentMode === 'shared' ? setKeyPoints(value) : setOverridePatch({ keyPoints: value }))
-  const setCurrentCommonErrors = (value: string[]) => (contentMode === 'shared' ? setCommonErrors(value) : setOverridePatch({ commonErrors: value }))
+  const setCurrentKeyPoints = (value: TechniqueTaggedNote[]) => (contentMode === 'shared' ? setKeyPoints(value) : setOverridePatch({ keyPoints: value }))
+  const setCurrentCommonErrors = (value: TechniqueTaggedNote[]) => (contentMode === 'shared' ? setCommonErrors(value) : setOverridePatch({ commonErrors: value }))
+  const updateCurrentVideo = (index: number, patch: Partial<TechniqueVideo>) =>
+    setCurrentVideos(currentVideos.map((video, videoIndex) => (videoIndex === index ? { ...video, ...patch } : video)))
 
   return (
     <div className="space-y-6">
@@ -290,6 +331,37 @@ export default function AdminTechniquesPage() {
             <button type="button" onClick={() => void saveTechnique()} disabled={uploading || !title.trim()} className="rounded-2xl border border-emerald-500/30 bg-emerald-500/12 px-4 py-3 text-sm font-semibold text-emerald-400 disabled:opacity-50">
               {uploading ? 'Wird gespeichert...' : editingId ? 'Aktualisieren' : 'Speichern'}
             </button>
+          </div>
+
+          <div className="mb-6 grid gap-4 rounded-3xl border border-white/8 bg-white/[0.02] p-4 md:grid-cols-2">
+            <div>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Stil-Abdeckung</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {COVERAGE_OPTIONS.map((option) => (
+                  <button key={option} type="button" onClick={() => setStyleCoverage(option)} className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${
+                    styleCoverage === option ? 'border border-bjj-gold/40 bg-bjj-gold/12 text-bjj-gold' : 'border border-white/10 bg-[#101723] text-white/70 hover:border-white/20 hover:text-white'
+                  }`}>
+                    {getTechniqueCoverageLabel(option)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Aktiver Detail-Editor</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {editableModes.map((mode) => (
+                  <button key={mode} type="button" onClick={() => setContentMode(mode)} className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${
+                    contentMode === mode ? 'border border-bjj-gold/40 bg-bjj-gold/12 text-bjj-gold' : 'border border-white/10 bg-[#101723] text-white/70 hover:border-white/20 hover:text-white'
+                  }`}>
+                    {modeLabel(mode)}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs leading-6 text-white/45">
+                {contentMode === 'shared' ? 'Dieser Inhalt wird standardmaessig fuer Gi und No-Gi genutzt.' : `Du bearbeitest gerade nur den Override fuer ${getTechniqueStyleLabel(contentMode)}.`}
+              </p>
+            </div>
           </div>
 
           <div className="mb-6 border-b border-white/8">
@@ -322,35 +394,6 @@ export default function AdminTechniquesPage() {
                 </div>
 
                 <div className="space-y-4">
-                  <div>
-                    <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Stil-Abdeckung</p>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {COVERAGE_OPTIONS.map((option) => (
-                        <button key={option} type="button" onClick={() => setStyleCoverage(option)} className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${
-                          styleCoverage === option ? 'border border-bjj-gold/40 bg-bjj-gold/12 text-bjj-gold' : 'border border-white/10 bg-[#101723] text-white/70 hover:border-white/20 hover:text-white'
-                        }`}>
-                          {getTechniqueCoverageLabel(option)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Detail-Editor</p>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {editableModes.map((mode) => (
-                        <button key={mode} type="button" onClick={() => setContentMode(mode)} className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${
-                          contentMode === mode ? 'border border-bjj-gold/40 bg-bjj-gold/12 text-bjj-gold' : 'border border-white/10 bg-[#101723] text-white/70 hover:border-white/20 hover:text-white'
-                        }`}>
-                          {modeLabel(mode)}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-3 text-xs leading-6 text-white/45">
-                      {contentMode === 'shared' ? 'Dieser Inhalt wird standardmaessig fuer Gi und No-Gi genutzt.' : `Nur wenn du fuer ${getTechniqueStyleLabel(contentMode)} bewusst abweichen willst, brauchst du hier einen Override.`}
-                    </p>
-                  </div>
-
                   <textarea value={currentDescription} onChange={(event) => setCurrentDescription(event.target.value)} placeholder={contentMode === 'shared' ? 'Gemeinsame Beschreibung' : `${getTechniqueStyleLabel(contentMode)} Beschreibung`} rows={5} className="w-full rounded-2xl border border-white/10 bg-[#101723] px-4 py-3 text-sm text-white outline-none focus:border-bjj-gold/50 resize-none" />
 
                   <div className="flex items-center gap-3">
@@ -425,25 +468,236 @@ export default function AdminTechniquesPage() {
 
             {activeTab === 'videos' ? (
               <div className="space-y-4">
-                <div className="flex gap-2">
-                  <input value={newVideo.title} onChange={(event) => setNewVideo({ ...newVideo, title: event.target.value })} placeholder="Video Titel" className="flex-1 rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none" />
-                  <input value={newVideo.url} onChange={(event) => setNewVideo({ ...newVideo, url: event.target.value })} placeholder="Video URL" className="flex-[2] rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none" />
-                  <select value={newVideo.platform} onChange={(event) => setNewVideo({ ...newVideo, platform: event.target.value as TechniqueVideo['platform'] })} className="rounded-2xl border border-white/10 bg-[#101723] px-3 py-2 text-sm text-white outline-none">
-                    <option value="youtube">YouTube</option>
-                    <option value="instagram">Instagram</option>
-                    <option value="other">Andere</option>
+                <div className="rounded-2xl border border-bjj-gold/20 bg-bjj-gold/8 px-4 py-3 text-sm text-white/72">
+                  Videos werden gerade in <span className="font-semibold text-bjj-gold">{modeLabel(contentMode)}</span> gespeichert.
+                </div>
+                <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_220px_auto]">
+                  <input value={newVideo.title} onChange={(event) => setNewVideo({ ...newVideo, title: event.target.value })} placeholder="Video Titel" className="rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none" />
+                  <input
+                    value={newVideo.url}
+                    onChange={(event) => {
+                      const url = event.target.value
+                      const videoType = inferTechniqueVideoType(url, newVideo.platform)
+                      setNewVideo({ ...newVideo, url, videoType, platform: detectVideoPlatform(videoType) })
+                    }}
+                    placeholder="Video URL"
+                    className="rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none"
+                  />
+                  <select
+                    value={newVideo.videoType}
+                    onChange={(event) => {
+                      const videoType = event.target.value as TechniqueVideoType
+                      setNewVideo({ ...newVideo, videoType, platform: detectVideoPlatform(videoType) })
+                    }}
+                    className="rounded-2xl border border-white/10 bg-[#101723] px-3 py-2 text-sm text-white outline-none"
+                  >
+                    {VIDEO_TYPE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{getTechniqueVideoTypeLabel(option)}</option>
+                    ))}
                   </select>
                   <button type="button" onClick={() => {
                     if (!newVideo.title.trim() || !newVideo.url.trim()) return
-                    setCurrentVideos([...currentVideos, { ...newVideo, id: `video-${Date.now()}`, title: newVideo.title.trim(), url: newVideo.url.trim() }])
-                    setNewVideo({ title: '', url: '', platform: 'youtube' })
+                    setCurrentVideos([
+                      ...currentVideos,
+                      {
+                        ...newVideo,
+                        id: `video-${Date.now()}`,
+                        title: newVideo.title.trim(),
+                        url: newVideo.url.trim(),
+                        platform: detectVideoPlatform(newVideo.videoType),
+                        description: newVideo.description.trim() || undefined,
+                        hashtags: normalizeHashtags(newVideo.hashtags),
+                      },
+                    ])
+                    setNewVideo(createEmptyVideoDraft())
                   }} className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-white/70 transition hover:bg-bjj-gold/20"><Plus className="h-4 w-4" /></button>
                 </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <textarea
+                    value={newVideo.description}
+                    onChange={(event) => setNewVideo({ ...newVideo, description: event.target.value })}
+                    placeholder="Video Beschreibung"
+                    rows={3}
+                    className="rounded-2xl border border-white/10 bg-[#101723] px-4 py-3 text-sm text-white outline-none resize-none"
+                  />
+                  <input
+                    value={formatHashtagInput(newVideo.hashtags)}
+                    onChange={(event) => setNewVideo({ ...newVideo, hashtags: normalizeHashtags(event.target.value) })}
+                    placeholder="Hashtags, z.B. #guard, #nogi"
+                    className="self-start rounded-2xl border border-white/10 bg-[#101723] px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+                <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:grid-cols-2">
+                  <div>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Clip-Art</p>
+                    <select
+                      value={newVideo.contentType}
+                      onChange={(event) => setNewVideo({ ...newVideo, contentType: event.target.value as ClipContentType })}
+                      className="w-full rounded-2xl border border-white/10 bg-[#101723] px-4 py-3 text-sm text-white outline-none"
+                    >
+                      {CLIP_CONTENT_TYPES.map((option) => (
+                        <option key={option} value={option}>{getClipContentTypeLabel(option)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Lernphase</p>
+                    <select
+                      value={newVideo.learningPhase}
+                      onChange={(event) => setNewVideo({ ...newVideo, learningPhase: event.target.value as ClipLearningPhase })}
+                      className="w-full rounded-2xl border border-white/10 bg-[#101723] px-4 py-3 text-sm text-white outline-none"
+                    >
+                      {CLIP_LEARNING_PHASES.map((option) => (
+                        <option key={option} value={option}>{getClipLearningPhaseLabel(option)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Passende Koerpertypen fuer dieses Video</p>
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {ARCHETYPES.map((archetype) => {
+                        const active = newVideo.targetArchetypeIds.includes(archetype.id)
+                        return (
+                          <button
+                            key={archetype.id}
+                            type="button"
+                            onClick={() =>
+                              setNewVideo((current) => ({
+                                ...current,
+                                targetArchetypeIds: current.targetArchetypeIds.includes(archetype.id)
+                                  ? current.targetArchetypeIds.filter((entry) => entry !== archetype.id)
+                                  : [...current.targetArchetypeIds, archetype.id],
+                              }))
+                            }
+                            className={`rounded-2xl border px-3 py-3 text-left text-sm transition ${
+                              active ? 'border-bjj-gold/35 bg-bjj-gold/10 text-white' : 'border-white/10 bg-[#101723] text-white/72'
+                            }`}
+                          >
+                            <p className="font-semibold">{archetype.name}</p>
+                            <p className="mt-1 text-xs text-white/45">{archetype.tagline}</p>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-white/45">
+                  Typ: <span className="text-white/70">{getTechniqueVideoTypeLabel(newVideo.videoType)}</span> • Format:{' '}
+                  <span className="text-white/70">{getTechniqueVideoOrientationLabel(newVideo.videoType)}</span> •{' '}
+                  <span className="text-white/70">{getClipLearningPhaseLabel(newVideo.learningPhase)}</span> •{' '}
+                  <span className="text-white/70">{getClipContentTypeLabel(newVideo.contentType)}</span>
+                </p>
                 <div className="space-y-2">
                   {currentVideos.map((video, index) => (
-                    <div key={video.id} className="flex items-center justify-between rounded-xl border border-white/10 bg-[#101723] px-4 py-3">
-                      <div className="flex items-center gap-3"><Play className="h-4 w-4 text-bjj-gold" /><span className="text-sm text-white">{video.title}</span><span className="text-xs text-white/40">({video.platform})</span></div>
-                      <button type="button" onClick={() => setCurrentVideos(currentVideos.filter((_, i) => i !== index))} className="text-white/40 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                    <div key={video.id} className="rounded-xl border border-white/10 bg-[#101723] px-4 py-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <Play className="h-4 w-4 text-bjj-gold" />
+                          <div>
+                            <span className="text-sm font-semibold text-white">{video.title}</span>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/40">
+                              <span>{getTechniqueVideoTypeLabel(video.videoType)}</span>
+                              <span>{getTechniqueVideoOrientationLabel(video.videoType)}</span>
+                              <span>{getClipLearningPhaseLabel(video.learningPhase)}</span>
+                              <span>{getClipContentTypeLabel(video.contentType)}</span>
+                              {video.targetArchetypeIds?.length ? <span>{video.targetArchetypeIds.length} Koerpertypen</span> : null}
+                              {video.hashtags?.length ? <span>{video.hashtags.length} Hashtags</span> : null}
+                            </div>
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => setCurrentVideos(currentVideos.filter((_, i) => i !== index))} className="text-white/40 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        <input
+                          value={video.title}
+                          onChange={(event) => updateCurrentVideo(index, { title: event.target.value })}
+                          placeholder="Video Titel"
+                          className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white outline-none"
+                        />
+                        <input
+                          value={video.url}
+                          onChange={(event) => {
+                            const url = event.target.value
+                            const videoType = inferTechniqueVideoType(url, video.platform)
+                            updateCurrentVideo(index, { url, videoType, platform: detectVideoPlatform(videoType) })
+                          }}
+                          placeholder="Video URL"
+                          className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white outline-none"
+                        />
+                        <textarea
+                          value={video.description ?? ''}
+                          onChange={(event) => updateCurrentVideo(index, { description: event.target.value.trim() ? event.target.value : undefined })}
+                          placeholder="Video Beschreibung"
+                          rows={3}
+                          className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none resize-none lg:col-span-2"
+                        />
+                        <input
+                          value={formatHashtagInput(video.hashtags)}
+                          onChange={(event) => updateCurrentVideo(index, { hashtags: normalizeHashtags(event.target.value) })}
+                          placeholder="Hashtags"
+                          className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white outline-none"
+                        />
+                        <select
+                          value={video.videoType}
+                          onChange={(event) => {
+                            const videoType = event.target.value as TechniqueVideoType
+                            updateCurrentVideo(index, { videoType, platform: detectVideoPlatform(videoType) })
+                          }}
+                          className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white outline-none"
+                        >
+                          {VIDEO_TYPE_OPTIONS.map((option) => (
+                            <option key={option} value={option}>{getTechniqueVideoTypeLabel(option)}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={video.contentType ?? 'technical_demo'}
+                          onChange={(event) => updateCurrentVideo(index, { contentType: event.target.value as ClipContentType })}
+                          className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white outline-none"
+                        >
+                          {CLIP_CONTENT_TYPES.map((option) => (
+                            <option key={option} value={option}>{getClipContentTypeLabel(option)}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={video.learningPhase ?? 'core_mechanic'}
+                          onChange={(event) => updateCurrentVideo(index, { learningPhase: event.target.value as ClipLearningPhase })}
+                          className="rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm text-white outline-none"
+                        >
+                          {CLIP_LEARNING_PHASES.map((option) => (
+                            <option key={option} value={option}>{getClipLearningPhaseLabel(option)}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="mt-4">
+                        <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-white/40">Passende Koerpertypen</p>
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {ARCHETYPES.map((archetype) => {
+                            const active = video.targetArchetypeIds?.includes(archetype.id) ?? false
+                            return (
+                              <button
+                                key={archetype.id}
+                                type="button"
+                                onClick={() => {
+                                  const currentIds = video.targetArchetypeIds ?? []
+                                  updateCurrentVideo(index, {
+                                    targetArchetypeIds: currentIds.includes(archetype.id)
+                                      ? currentIds.filter((entry) => entry !== archetype.id)
+                                      : [...currentIds, archetype.id],
+                                  })
+                                }}
+                                className={`rounded-2xl border px-3 py-3 text-left text-sm transition ${
+                                  active ? 'border-bjj-gold/35 bg-bjj-gold/10 text-white' : 'border-white/10 bg-black/20 text-white/72'
+                                }`}
+                              >
+                                <p className="font-semibold">{archetype.name}</p>
+                                <p className="mt-1 text-xs text-white/45">{archetype.tagline}</p>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -511,24 +765,38 @@ export default function AdminTechniquesPage() {
 
             {activeTab === 'keypoints' ? (
               <div className="space-y-4">
-                <div className="flex gap-2">
-                  <input value={newKeyPoint} onChange={(event) => setNewKeyPoint(event.target.value)} placeholder="Wichtiger Punkt..." className="flex-1 rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none" onKeyDown={(event) => {
-                    if (event.key === 'Enter' && newKeyPoint.trim()) {
+                <div className="rounded-2xl border border-bjj-gold/20 bg-bjj-gold/8 px-4 py-3 text-sm text-white/72">
+                  Key Points werden gerade in <span className="font-semibold text-bjj-gold">{modeLabel(contentMode)}</span> gespeichert.
+                </div>
+                <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_auto]">
+                  <input value={newKeyPoint.text} onChange={(event) => setNewKeyPoint({ ...newKeyPoint, text: event.target.value })} placeholder="Wichtiger Punkt..." className="rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none" onKeyDown={(event) => {
+                    if (event.key === 'Enter' && newKeyPoint.text.trim()) {
                       event.preventDefault()
-                      setCurrentKeyPoints([...currentKeyPoints, newKeyPoint.trim()])
-                      setNewKeyPoint('')
+                      setCurrentKeyPoints([...currentKeyPoints, { id: `keypoint-${Date.now()}`, text: newKeyPoint.text.trim(), styleCoverage: newKeyPoint.styleCoverage }])
+                      setNewKeyPoint({ text: '', styleCoverage: 'both' })
                     }
                   }} />
+                  <select value={newKeyPoint.styleCoverage} onChange={(event) => setNewKeyPoint({ ...newKeyPoint, styleCoverage: event.target.value as TechniqueStyleCoverage })} className="rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none">
+                    {COVERAGE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{getTechniqueCoverageLabel(option)}</option>
+                    ))}
+                  </select>
                   <button type="button" onClick={() => {
-                    if (!newKeyPoint.trim()) return
-                    setCurrentKeyPoints([...currentKeyPoints, newKeyPoint.trim()])
-                    setNewKeyPoint('')
+                    if (!newKeyPoint.text.trim()) return
+                    setCurrentKeyPoints([...currentKeyPoints, { id: `keypoint-${Date.now()}`, text: newKeyPoint.text.trim(), styleCoverage: newKeyPoint.styleCoverage }])
+                    setNewKeyPoint({ text: '', styleCoverage: 'both' })
                   }} className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-white/70 transition hover:bg-bjj-gold/20"><Plus className="h-4 w-4" /></button>
                 </div>
                 <div className="space-y-2">
                   {currentKeyPoints.map((point, index) => (
-                    <div key={`${point}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-[#101723] px-4 py-3">
-                      <div className="flex items-center gap-3"><Check className="h-4 w-4 text-emerald-400" /><span className="text-sm text-white">{point}</span></div>
+                    <div key={`${point.id}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-[#101723] px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Check className="h-4 w-4 text-emerald-400" />
+                        <div>
+                          <span className="text-sm text-white">{point.text}</span>
+                          <p className="mt-1 text-xs text-bjj-gold">{getTechniqueCoverageLabel(point.styleCoverage ?? 'both')}</p>
+                        </div>
+                      </div>
                       <button type="button" onClick={() => setCurrentKeyPoints(currentKeyPoints.filter((_, i) => i !== index))} className="text-white/40 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   ))}
@@ -538,24 +806,38 @@ export default function AdminTechniquesPage() {
 
             {activeTab === 'errors' ? (
               <div className="space-y-4">
-                <div className="flex gap-2">
-                  <input value={newError} onChange={(event) => setNewError(event.target.value)} placeholder="Haeufiger Fehler..." className="flex-1 rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none" onKeyDown={(event) => {
-                    if (event.key === 'Enter' && newError.trim()) {
+                <div className="rounded-2xl border border-bjj-gold/20 bg-bjj-gold/8 px-4 py-3 text-sm text-white/72">
+                  Fehler werden gerade in <span className="font-semibold text-bjj-gold">{modeLabel(contentMode)}</span> gespeichert.
+                </div>
+                <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_auto]">
+                  <input value={newError.text} onChange={(event) => setNewError({ ...newError, text: event.target.value })} placeholder="Haeufiger Fehler..." className="rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none" onKeyDown={(event) => {
+                    if (event.key === 'Enter' && newError.text.trim()) {
                       event.preventDefault()
-                      setCurrentCommonErrors([...currentCommonErrors, newError.trim()])
-                      setNewError('')
+                      setCurrentCommonErrors([...currentCommonErrors, { id: `error-${Date.now()}`, text: newError.text.trim(), styleCoverage: newError.styleCoverage }])
+                      setNewError({ text: '', styleCoverage: 'both' })
                     }
                   }} />
+                  <select value={newError.styleCoverage} onChange={(event) => setNewError({ ...newError, styleCoverage: event.target.value as TechniqueStyleCoverage })} className="rounded-2xl border border-white/10 bg-[#101723] px-4 py-2 text-sm text-white outline-none">
+                    {COVERAGE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{getTechniqueCoverageLabel(option)}</option>
+                    ))}
+                  </select>
                   <button type="button" onClick={() => {
-                    if (!newError.trim()) return
-                    setCurrentCommonErrors([...currentCommonErrors, newError.trim()])
-                    setNewError('')
+                    if (!newError.text.trim()) return
+                    setCurrentCommonErrors([...currentCommonErrors, { id: `error-${Date.now()}`, text: newError.text.trim(), styleCoverage: newError.styleCoverage }])
+                    setNewError({ text: '', styleCoverage: 'both' })
                   }} className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-white/70 transition hover:bg-bjj-gold/20"><Plus className="h-4 w-4" /></button>
                 </div>
                 <div className="space-y-2">
                   {currentCommonErrors.map((error, index) => (
-                    <div key={`${error}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-[#101723] px-4 py-3">
-                      <div className="flex items-center gap-3"><AlertTriangle className="h-4 w-4 text-orange-400" /><span className="text-sm text-white">{error}</span></div>
+                    <div key={`${error.id}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-[#101723] px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <AlertTriangle className="h-4 w-4 text-orange-400" />
+                        <div>
+                          <span className="text-sm text-white">{error.text}</span>
+                          <p className="mt-1 text-xs text-bjj-gold">{getTechniqueCoverageLabel(error.styleCoverage ?? 'both')}</p>
+                        </div>
+                      </div>
                       <button type="button" onClick={() => setCurrentCommonErrors(currentCommonErrors.filter((_, i) => i !== index))} className="text-white/40 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   ))}

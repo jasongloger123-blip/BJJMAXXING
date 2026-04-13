@@ -1,7 +1,16 @@
 import type { TechniqueStage } from '@/components/technique-library/types'
-import type { ResolvedGameplan } from '@/lib/gameplans'
+import type { PlanNode, ResolvedGameplan } from '@/lib/gameplans'
 import { getNodeById, type SkillNode } from '@/lib/nodes'
-import { getCustomTechniqueById, type CustomTechniqueRecord, type TechniqueStyleOverrides } from '@/lib/custom-techniques'
+import {
+  getCustomTechniqueById,
+  inferTechniqueVideoType,
+  readCustomTechniques,
+  type CustomTechniqueRecord,
+  type TechniqueStyleOverrides,
+  type TechniqueTaggedNote,
+  type TechniqueVideo,
+  type TechniqueVideoType,
+} from '@/lib/custom-techniques'
 import { coverageIncludesStyle, type TechniqueStyle, type TechniqueStyleCoverage } from '@/lib/technique-style'
 
 export type TechniqueCatalogEntry =
@@ -15,11 +24,11 @@ export type TechniqueCatalogEntry =
       fighter: string
       level: number
       image: string
-      videos: { id: string; title: string; url: string; platform: string }[]
+      videos: TechniqueVideo[]
       counters: { id: string; title: string; description: string; styleCoverage?: TechniqueStyleCoverage }[]
       drills: { id: string; title: string; description: string; duration?: string; styleCoverage?: TechniqueStyleCoverage }[]
-      keyPoints: string[]
-      commonErrors: string[]
+      keyPoints: TechniqueTaggedNote[]
+      commonErrors: TechniqueTaggedNote[]
       prerequisites: string[]
       styleCoverage: TechniqueStyleCoverage
       styleOverrides?: never
@@ -34,11 +43,11 @@ export type TechniqueCatalogEntry =
       fighter: string
       level: number
       image: string
-      videos: { id: string; title: string; url: string; platform: string }[]
+      videos: TechniqueVideo[]
       counters: { id: string; title: string; description: string; styleCoverage?: TechniqueStyleCoverage }[]
       drills: { id: string; title: string; description: string; duration?: string; styleCoverage?: TechniqueStyleCoverage }[]
-      keyPoints: string[]
-      commonErrors: string[]
+      keyPoints: TechniqueTaggedNote[]
+      commonErrors: TechniqueTaggedNote[]
       prerequisites: string[]
       styleCoverage: TechniqueStyleCoverage
       styleOverrides?: TechniqueStyleOverrides
@@ -87,12 +96,24 @@ function nodeToTechnique(node: SkillNode): TechniqueCatalogEntry {
     fighter: 'BJJMAXXING',
     level: node.level,
     image: getThumbnail(node.videos[0]?.url),
-    videos: node.videos.map((video, index) => ({
-      id: `${node.id}-video-${index}`,
-      title: video.title,
-      url: video.url,
-      platform: video.creator,
-    })),
+    videos: node.videos.map((video, index) => {
+      const platform: TechniqueVideo['platform'] = video.url.includes('instagram.com')
+        ? 'instagram'
+        : video.url.includes('youtube.com') || video.url.includes('youtu.be')
+          ? 'youtube'
+          : 'other'
+
+      return {
+        id: `${node.id}-video-${index}`,
+        title: video.title,
+        url: video.url,
+        platform,
+        videoType: inferTechniqueVideoType(video.url, platform),
+        contentType: 'technical_demo',
+        learningPhase: index === 0 ? 'overview' : 'core_mechanic',
+        targetArchetypeIds: [],
+      }
+    }),
     counters: [],
     drills: node.drill
       ? [
@@ -104,8 +125,8 @@ function nodeToTechnique(node: SkillNode): TechniqueCatalogEntry {
           },
         ]
       : [],
-    keyPoints: node.successDefinition,
-    commonErrors: node.commonErrors,
+    keyPoints: node.successDefinition.map((text, index) => ({ id: `${node.id}-keypoint-${index}`, text, styleCoverage: 'both' })),
+    commonErrors: node.commonErrors.map((text, index) => ({ id: `${node.id}-error-${index}`, text, styleCoverage: 'both' })),
     prerequisites: node.prerequisites,
     styleCoverage: 'both',
   }
@@ -144,8 +165,12 @@ export function resolveTechniqueCatalogContent(entry: TechniqueCatalogEntry, sty
       videos: override?.videos && override.videos.length > 0 ? override.videos : entry.videos,
       counters: resolvedCounters.filter((counter) => coverageIncludesStyle(counter.styleCoverage ?? 'both', style)),
       drills: resolvedDrills.filter((drill) => coverageIncludesStyle(drill.styleCoverage ?? 'both', style)),
-      keyPoints: override?.keyPoints && override.keyPoints.length > 0 ? override.keyPoints : entry.keyPoints,
-      commonErrors: override?.commonErrors && override.commonErrors.length > 0 ? override.commonErrors : entry.commonErrors,
+      keyPoints: (override?.keyPoints && override.keyPoints.length > 0 ? override.keyPoints : entry.keyPoints).filter((item) =>
+        coverageIncludesStyle(item.styleCoverage ?? 'both', style)
+      ),
+      commonErrors: (override?.commonErrors && override.commonErrors.length > 0 ? override.commonErrors : entry.commonErrors).filter((item) =>
+        coverageIncludesStyle(item.styleCoverage ?? 'both', style)
+      ),
     }
   }
 
@@ -154,8 +179,8 @@ export function resolveTechniqueCatalogContent(entry: TechniqueCatalogEntry, sty
     videos: entry.videos,
     counters: entry.counters.filter((counter) => coverageIncludesStyle(counter.styleCoverage ?? 'both', style)),
     drills: entry.drills.filter((drill) => coverageIncludesStyle(drill.styleCoverage ?? 'both', style)),
-    keyPoints: entry.keyPoints,
-    commonErrors: entry.commonErrors,
+    keyPoints: entry.keyPoints.filter((item) => coverageIncludesStyle(item.styleCoverage ?? 'both', style)),
+    commonErrors: entry.commonErrors.filter((item) => coverageIncludesStyle(item.styleCoverage ?? 'both', style)),
   }
 }
 
@@ -168,6 +193,38 @@ export function getTechniqueCatalogEntryById(id: string): TechniqueCatalogEntry 
   const node = getNodeById(id)
   if (node) {
     return nodeToTechnique(node)
+  }
+
+  return null
+}
+
+export function getTechniqueCatalogEntryForPlanNode(node?: Pick<PlanNode, 'id' | 'sourceNodeId' | 'title' | 'label'> | null) {
+  if (!node) return null
+
+  const directIds = [node.sourceNodeId, node.id].filter((value): value is string => Boolean(value))
+  for (const id of directIds) {
+    const entry = getTechniqueCatalogEntryById(id)
+    if (entry) {
+      return entry
+    }
+  }
+
+  const normalizedTitle = node.title.trim().toLowerCase()
+  const normalizedLabel = node.label.trim().toLowerCase()
+  const customTechniques = readCustomTechniques()
+  const matchedCustomTechnique = customTechniques.find((technique) => {
+    const titleMatches = technique.title.trim().toLowerCase() === normalizedTitle
+    const subtitleMatches = normalizedLabel.length > 0 && technique.subtitle.trim().toLowerCase() === normalizedLabel
+    return titleMatches || subtitleMatches
+  })
+
+  if (matchedCustomTechnique) {
+    return customTechniqueToEntry(matchedCustomTechnique)
+  }
+
+  const matchedNode = getNodeById(node.id) ?? getNodeById(node.sourceNodeId ?? '') ?? null
+  if (matchedNode) {
+    return nodeToTechnique(matchedNode)
   }
 
   return null

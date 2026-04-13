@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Bell, BookOpen, ChevronLeft, ChevronRight, DatabaseZap, Home, MapPin, Sparkles, User2, Waypoints } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { getFlagSvgUrl } from '@/lib/countries'
-import { isAdminEmail } from '@/lib/admin-access'
+import { hasAdminAccess } from '@/lib/admin-access'
 
 const SIDEBAR_LOGO_SRC = '/bjj-maxxing-logo.png'
 const SIDEBAR_LOGO_COMPACT_SRC = '/bjj-maxxing-logo-compact.png'
@@ -27,13 +27,14 @@ type LayoutProfile = {
   avatar_url?: string | null
   primary_archetype?: string | null
   nationality?: string | null
+  email?: string | null
 } | null
 
 async function loadLayoutProfileSafe(supabase: ReturnType<typeof createClient>, userId: string) {
   const attempts = [
-    'username, full_name, avatar_url, primary_archetype, nationality',
-    'username, full_name, avatar_url, primary_archetype',
-    'full_name, avatar_url, primary_archetype',
+    'username, full_name, avatar_url, primary_archetype, nationality, email',
+    'username, full_name, avatar_url, primary_archetype, email',
+    'full_name, avatar_url, primary_archetype, email',
   ]
 
   for (const select of attempts) {
@@ -44,6 +45,7 @@ async function loadLayoutProfileSafe(supabase: ReturnType<typeof createClient>, 
           username: null,
           avatar_url: null,
           nationality: null,
+          email: null,
           ...(result.data ?? {}),
         } as LayoutProfile,
       }
@@ -67,6 +69,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [nationality, setNationality] = useState<string | null>(null)
   const [hasCoreProfile, setHasCoreProfile] = useState(false)
+  const [isGameplanImmersive, setIsGameplanImmersive] = useState(false)
 
   useEffect(() => {
     const saved = window.localStorage.getItem('bjj-sidebar-collapsed')
@@ -100,7 +103,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       setAvatarUrl(profile?.avatar_url ?? null)
       setNationality(profile?.nationality ?? null)
       setArchetypeName(profile?.primary_archetype ? profile.primary_archetype.replaceAll('-', ' ') : 'Noch offen')
-      setIsAdmin(isAdminEmail(user.email))
+      setIsAdmin(hasAdminAccess({ email: user.email, profileEmail: profile?.email }))
       setUnreadNotifications(unreadResult.error ? 0 : unreadResult.count ?? 0)
       setHasCoreProfile(hasCoreProfile)
       setProfileStateLoaded(true)
@@ -121,6 +124,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('profile-ready-changed', onProfileRefresh)
   }, [pathname, router, supabase])
 
+  useEffect(() => {
+    if (!pathname.startsWith('/gameplan')) {
+      setIsGameplanImmersive(false)
+    }
+
+    function handleGameplanLayoutMode(event: Event) {
+      const detail = (event as CustomEvent<{ detailMode?: boolean }>).detail?.detailMode
+      setIsGameplanImmersive(Boolean(detail))
+    }
+
+    window.addEventListener('gameplan-layout-mode', handleGameplanLayoutMode)
+    return () => window.removeEventListener('gameplan-layout-mode', handleGameplanLayoutMode)
+  }, [pathname])
+
   const navItems = useMemo(() => fullNavItems.filter((item) => !item.adminOnly || isAdmin), [isAdmin])
   const initials = displayName
     .split(' ')
@@ -132,7 +149,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/')
   const sidebarWidthClass = isSidebarCollapsed ? 'w-24' : 'w-64'
   const shouldLockNavigation = profileStateLoaded && !hasCoreProfile
-  const contentOffsetClass = shouldLockNavigation ? '' : showGameplanSidebar ? 'lg:pl-24' : isSidebarCollapsed ? 'lg:pl-24' : 'lg:pl-64'
+  const contentOffsetClass = shouldLockNavigation ? '' : showGameplanSidebar && isGameplanImmersive ? 'lg:pl-24' : isSidebarCollapsed ? 'lg:pl-24' : 'lg:pl-64'
   const flagSvgUrl = getFlagSvgUrl(nationality)
 
   async function handleLogout() {
@@ -158,10 +175,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         } as React.CSSProperties
       }
     >
-      {!shouldLockNavigation ? (
-        <aside
-          className={`fixed left-0 top-0 z-50 hidden h-screen border-r border-black/20 bg-[linear-gradient(180deg,rgba(22,29,41,0.98),rgba(16,21,31,0.98))] p-4 backdrop-blur transition-[width] duration-300 lg:flex lg:flex-col ${sidebarWidthClass}`}
-        >
+      {/* Waehrend des Ladens nichts anzeigen */}
+      {!profileStateLoaded ? (
+        <div className="flex min-h-screen items-center justify-center bg-bjj-bg">
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-12 w-12 animate-spin rounded-full border-4 border-bjj-border border-t-bjj-gold" />
+            <p className="text-sm text-bjj-muted">Lade...</p>
+          </div>
+        </div>
+      ) : shouldLockNavigation ? (
+        /* Onboarding-Modus: Keine Sidebar/Navigation, nur Inhalt */
+        <div className="min-h-screen bg-bjj-bg">{children}</div>
+      ) : (
+        /* Normaler Modus: Volles Layout mit Sidebar */
+        <>
+          <aside
+            className={`fixed left-0 top-0 z-50 hidden h-screen border-r border-black/20 bg-[linear-gradient(180deg,rgba(22,29,41,0.98),rgba(16,21,31,0.98))] p-4 backdrop-blur transition-[width] duration-300 lg:flex lg:flex-col ${sidebarWidthClass}`}
+          >
         <div className="mb-5">
           <div
             className={`flex items-center ${
@@ -174,19 +204,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               aria-label="BJJMAXXING Start"
             >
               {isSidebarCollapsed ? (
-                <div className="flex h-[5.1rem] w-[5.1rem] items-center justify-center overflow-hidden rounded-[1.55rem] bg-transparent">
+                <div className="flex w-full items-center justify-center overflow-hidden rounded-[1.4rem] border border-black/20 bg-black/10 p-2">
                   <img
                     src={SIDEBAR_LOGO_COMPACT_SRC}
                     alt="BJJMAXXING"
-                    className="h-full w-full object-contain"
+                    className="h-16 w-16 object-contain"
                   />
                 </div>
               ) : (
-                <div className="flex w-full items-center overflow-hidden">
+                <div className="flex w-full items-center overflow-hidden rounded-[1.4rem] border border-black/20 bg-black/10 p-3">
                   <img
                     src={SIDEBAR_LOGO_SRC}
                     alt="BJJMAXXING Logo"
-                    className="h-24 w-full max-w-none object-contain object-left"
+                    className="h-20 w-full max-w-none object-contain object-left"
                   />
                 </div>
               )}
@@ -320,53 +350,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        </aside>
-      ) : null}
+          </aside>
 
-      <div className={contentOffsetClass}>
-        {!shouldLockNavigation ? (
-          <header className="sticky top-0 z-20 border-b border-bjj-border bg-bjj-bg/92 backdrop-blur lg:hidden">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-6">
-            <Link href="/" className="flex items-center gap-3 text-white">
-              <span className="flex items-center justify-center overflow-hidden rounded-2xl border border-bjj-gold/20 bg-[linear-gradient(180deg,rgba(245,158,11,0.12),rgba(26,34,48,0.72))]">
-                <img
-                  src={SIDEBAR_LOGO_SRC}
-                  alt="BJJMAXXING Logo"
-                  className="h-11 w-[152px] object-contain px-2 py-1"
-                />
-              </span>
-              <span className="sr-only">BJJMAXXING</span>
-            </Link>
-
-            <div className="flex items-center gap-3">
-              <Link
-                href="/notifications"
-                className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-bjj-border bg-bjj-card text-bjj-muted transition-colors hover:text-bjj-text"
-                aria-label="Benachrichtigungen"
-              >
-                <Bell className="h-5 w-5" />
-                {unreadNotifications > 0 ? (
-                  <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-bjj-gold px-1 text-[10px] font-black text-bjj-coal">
-                    {unreadNotifications}
+          <div className={contentOffsetClass}>
+            <header className="sticky top-0 z-20 border-b border-bjj-border bg-bjj-bg/92 backdrop-blur lg:hidden">
+              <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-6">
+                <Link href="/" className="flex items-center gap-3 text-white">
+                  <span className="flex items-center justify-center overflow-hidden rounded-2xl border border-bjj-gold/20 bg-[linear-gradient(180deg,rgba(245,158,11,0.12),rgba(26,34,48,0.72))] px-3 py-2">
+                    <img
+                      src={SIDEBAR_LOGO_SRC}
+                      alt="BJJMAXXING Logo"
+                      className="h-12 w-[168px] object-contain"
+                    />
                   </span>
-                ) : null}
-              </Link>
+                  <span className="sr-only">BJJMAXXING</span>
+                </Link>
 
-              <button
-                onClick={handleLogout}
-                className="rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm font-semibold text-bjj-muted transition-colors hover:text-bjj-text"
-              >
-                Ausloggen
-              </button>
-            </div>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href="/notifications"
+                    className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-bjj-border bg-bjj-card text-bjj-muted transition-colors hover:text-bjj-text"
+                    aria-label="Benachrichtigungen"
+                  >
+                    <Bell className="h-5 w-5" />
+                    {unreadNotifications > 0 ? (
+                      <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-bjj-gold px-1 text-[10px] font-black text-bjj-coal">
+                        {unreadNotifications}
+                      </span>
+                    ) : null}
+                  </Link>
+
+                  <button
+                    onClick={handleLogout}
+                    className="rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm font-semibold text-bjj-muted transition-colors hover:text-bjj-text"
+                  >
+                    Ausloggen
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            <main className={showGameplanSidebar && isGameplanImmersive ? 'w-full overflow-hidden px-0 py-0 lg:h-screen' : 'w-full px-4 py-6 md:px-6 md:py-8 lg:py-6'}>
+              {children}
+            </main>
           </div>
-          </header>
-        ) : null}
-
-        <main className={showGameplanSidebar ? 'w-full overflow-hidden px-0 py-0 lg:h-screen' : 'w-full px-4 py-6 md:px-6 md:py-8 lg:py-6'}>
-          {profileStateLoaded ? children : <div className="h-40 rounded-3xl border border-bjj-border bg-bjj-card shimmer" />}
-        </main>
-      </div>
+        </>
+      )}
     </div>
   )
 }

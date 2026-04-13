@@ -379,11 +379,20 @@ function buildTitleFromText(text: string, fallback: string) {
 }
 
 function mapSequenceToImportRecord(sequence: OutlierSequence, query: string, group?: OutlierGroup): ParsedOutlierSequence {
-  const hashtags = normalizeHashtags((sequence.hashtags ?? []).map((entry) => entry.tag ?? ''))
+  // Hashtags können entweder als String-Array oder als OutlierHashtag[] ({ _id, tag }) kommen
+  const rawHashtags = (sequence.hashtags ?? []).map((entry) => {
+    if (typeof entry === 'string') return entry
+    if (entry && typeof entry === 'object') {
+      const tagValue = (entry as { tag?: unknown }).tag
+      return typeof tagValue === 'string' ? tagValue : ''
+    }
+    return ''
+  }).filter(Boolean)
+  const hashtags = normalizeHashtags(rawHashtags)
   const seconds = typeof sequence.startingTimestamp === 'number' ? sequence.startingTimestamp : null
   const videoUrl = sequence.videoURL?.trim() || null
   const fallbackTitle = hashtags.length > 0 ? hashtags.slice(0, 3).join(' ') : `OutlierDB Sequence ${sequence._id.slice(0, 8)}`
-  // Übersetze die Beschreibung, behalte BJJ-Terme auf Englisch
+  // Uebersetze die Beschreibung, behalte BJJ-Terme auf Englisch
   const rawSummary = truncateText(normalizeWhitespace(sequence.note ?? ''), MAX_SUMMARY_LENGTH) || null
   const summary = rawSummary ? translateDescription(rawSummary) : null
 
@@ -415,7 +424,7 @@ function extractRelativeOutlierLinksFromText(value: string) {
   const links: ParsedChatLink[] = []
   const seen = new Set<string>()
 
-  const markdownMatches = Array.from(value.matchAll(/\[([^\]]+)\]\((\/sequences\/[^)\s]+)\)/g))
+  const markdownMatches = Array.from(value.matchAll(/\[([^\]]+)\]\((\/(?:sequences|resource|resources)\/[^)\s]+)\)/g))
   for (const match of markdownMatches) {
     const deeplink = match[2]?.trim()
     if (!deeplink || seen.has(deeplink)) continue
@@ -427,7 +436,7 @@ function extractRelativeOutlierLinksFromText(value: string) {
     })
   }
 
-  const plainMatches = Array.from(value.matchAll(/(^|[\s(])((\/sequences\/[a-zA-Z0-9]+(?:\?type=[a-z_]+)?))/g))
+  const plainMatches = Array.from(value.matchAll(/(^|[\s(])((\/(?:sequences|resource|resources)\/[a-zA-Z0-9]+(?:\?type=[a-z_]+)?))/g))
   for (const match of plainMatches) {
     const deeplink = match[2]?.trim()
     if (!deeplink || seen.has(deeplink)) continue
@@ -647,7 +656,27 @@ function extractHtmlButtonHashtags(html: string) {
     html.matchAll(/<button[^>]*>[\s\S]*?<span>(#[a-z0-9_-]+)<\/span>[\s\S]*?<\/button>/gi)
   ).map((match) => match[1] ?? '')
 
-  return normalizeHashtags([...hashtagsFromTitles, ...hashtagsFromButtons])
+  // Zusaetzliche Patterns fuer OutlierDB Hashtag-Buttons
+  const hashtagsFromDataAttributes = Array.from(
+    html.matchAll(/data-hashtag=["']([^"']+)["']/gi)
+  ).map((match) => match[1] ?? '')
+
+  const hashtagsFromJsonLike = Array.from(
+    html.matchAll(/"tag"\s*:\s*"(#[a-z0-9_-]+)"/gi)
+  ).map((match) => match[1] ?? '')
+
+  // Suche nach Hashtags in URL-Parametern (z.B. ?hashtag=#nogi)
+  const hashtagsFromUrls = Array.from(
+    html.matchAll(/[?&]hashtag=([^&\s"']+)/gi)
+  ).map((match) => decodeURIComponent(match[1] ?? ''))
+
+  return normalizeHashtags([
+    ...hashtagsFromTitles,
+    ...hashtagsFromButtons,
+    ...hashtagsFromDataAttributes,
+    ...hashtagsFromJsonLike,
+    ...hashtagsFromUrls
+  ])
 }
 
 function stripHtmlTags(value: string) {
@@ -679,10 +708,13 @@ function isGenericOutlierDescription(value: string | null) {
   if (!value) return true
 
   const normalized = value.toLowerCase()
+  // Nur sehr spezifische Marketing-Texte als "generisch" markieren
+  // NICHT einfach alle Texte mit "outlierdb" ausschliessen
   return (
     normalized.includes('your gateway to advance brazilian jiu jitsu analytics') ||
     normalized.includes('discover professional match analysis') ||
-    normalized.includes('outlierdb') ||
+    normalized === 'outlierdb' ||
+    normalized === 'outlier db' ||
     normalized.length < 24
   )
 }
@@ -770,8 +802,13 @@ function extractStructuredSequenceDataFromUnknown(value: unknown) {
       Array.isArray(record.hashtags)
         ? record.hashtags.flatMap((hashtag) => {
             if (typeof hashtag === 'string') return [hashtag]
-            if (hashtag && typeof hashtag === 'object' && typeof (hashtag as { tag?: unknown }).tag === 'string') {
-              return [(hashtag as { tag: string }).tag]
+            if (hashtag && typeof hashtag === 'object') {
+              // OutlierDB format: { _id: string, tag: string }
+              const tagValue = (hashtag as { tag?: unknown }).tag
+              if (typeof tagValue === 'string') return [tagValue]
+              // Alternative format: { tag: string }
+              const altTag = (hashtag as Record<string, unknown>)['tag']
+              if (typeof altTag === 'string') return [altTag]
             }
             return []
           })
@@ -841,19 +878,33 @@ function extractStructuredSequenceDataFromHtml(html: string) {
       return score(b) - score(a)
     })[0] ?? null
 
-  const noteMatch =
-    html.match(/"note"\s*:\s*"((?:\\.|[^"])*)"/i)?.[1] ??
-    html.match(/<p[^>]*class=["'][^"']*note[^"']*["'][^>]*>([\s\S]*?)<\/p>/i)?.[1]
-  const noteSummary = noteMatch ? stripHtmlTags(decodeEscapedJsonString(noteMatch)) : null
+  // Versuche "note" aus verschiedenen Quellen zu extrahieren
+  // 1. Aus JSON-escaped strings im HTML
+  const noteMatchJson = html.match(/"note"\s*:\s*"((?:\\.|[^"])*)"/i)?.[1]
+  // 2. Aus meta tags
+  const noteMatchMeta = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+                        html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1]
+  // 3. Aus dem Text direkt nach "note": im HTML body
+  const noteMatchBody = html.match(/"note"\s*:\s*"([^"\\]+(?:\\.[^"\\]+)*)"/)?.[1]
+  
+  const noteFromJson = noteMatchJson ? decodeEscapedJsonString(noteMatchJson) : null
+  const noteFromBody = noteMatchBody ? noteMatchBody.replace(/\\"/g, '"').replace(/\\n/g, ' ').trim() : null
+  const noteSummary = normalizeWhitespace(noteFromJson ?? noteFromBody ?? noteMatchMeta ?? '')
+  
   const visibleSummary = extractDescriptionFromHtml(html)
 
+  // Hashtags aus verschiedenen Quellen extrahieren
+  // 1. Aus JSON "tag" Feldern
   const hashtagMatches = Array.from(html.matchAll(/"tag"\s*:\s*"((?:\\.|[^"])*)"/gi)).map((match) =>
     decodeEscapedJsonString(match[1] ?? '')
   )
+  // 2. Aus Array-Format: [{"tag": "#value"}, ...]
+  const hashtagArrayMatches = Array.from(html.matchAll(/"tag"\s*:\s*"(#[a-z0-9_-]+)"/gi)).map((match) => match[1] ?? '')
   const htmlButtonHashtags = extractHtmlButtonHashtags(html)
   const hashtags = normalizeHashtags([
     ...(bestStructured?.hashtags ?? []),
     ...hashtagMatches,
+    ...hashtagArrayMatches,
     ...htmlButtonHashtags,
   ])
 
@@ -1072,7 +1123,12 @@ function extractContextAroundOffset(text: string, offset: number) {
   return excerpt ? truncatePreservingWhitespace(excerpt, 700) : null
 }
 
-function buildAiRunSections(payload: unknown, sourceUrlByCitationKey: Map<string, string>) {
+function buildAiRunSections(
+  payload: unknown,
+  sourceUrlByCitationKey: Map<string, string>,
+  textLinks: ParsedChatLink[] = [],
+  sourceUrlByLinkKey: Map<string, string> = new Map()
+) {
   const compactPayload = compactChatPayload(payload)
   const rawText = typeof compactPayload.text === 'string' ? compactPayload.text : ''
   if (!rawText.trim()) return []
@@ -1133,6 +1189,16 @@ function buildAiRunSections(payload: unknown, sourceUrlByCitationKey: Map<string
     const section = sectionAccumulator[sectionIndex]
     assignedSourceUrls.add(sourceUrl)
     addSourceToSection(section, sourceUrl, citationIndex, extractContextAroundOffset(rawText, foundOffset >= 0 ? foundOffset : section.startIndex))
+  })
+
+  textLinks.forEach((link, orderIndex) => {
+    const sourceUrl = sourceUrlByLinkKey.get(link.deeplink)
+    if (!sourceUrl || assignedSourceUrls.has(sourceUrl)) return
+
+    const sectionIndex = findSectionIndexForOffset(link.index)
+    const section = sectionAccumulator[sectionIndex]
+    assignedSourceUrls.add(sourceUrl)
+    addSourceToSection(section, sourceUrl, orderIndex, extractContextAroundOffset(rawText, link.index))
   })
 
   sourceUrlByCitationKey.forEach((sourceUrl) => {
@@ -1328,21 +1394,41 @@ function buildChatImportRecord({
 async function resolveChatLinksIntoSources(message: string, authToken: string, payload: unknown) {
   const citations = extractChatCitations(payload)
   const compactPayload = compactChatPayload(payload)
+  const rawText = typeof compactPayload.text === 'string' ? compactPayload.text : ''
+  const relativeLinks = rawText ? extractRelativeOutlierLinksFromText(rawText) : []
   if (citations.length > 0) {
     const importedFromCitations: ParsedOutlierSequence[] = []
     const seen = new Set<string>()
     const sourceUrlByCitationKey = new Map<string, string>()
+    const sourceUrlByLinkKey = new Map<string, string>()
+    const linkBackedCitations = relativeLinks
+      .filter((link) => !citations.some((citation) => citation.deeplink === link.deeplink))
+      .map((link): ParsedChatCitation => ({
+        deeplink: link.deeplink,
+        title: link.title ?? undefined,
+      }))
 
-    for (const citation of citations) {
+    for (const citation of [...citations, ...linkBackedCitations]) {
       const sourceUrl = canonicalizeSourceUrl(
         buildOutlierDeeplinkUrl(citation.deeplink) ?? citation.videoUrl ?? `outlierdb:citation:${citation.id ?? citation.title ?? message}`,
         citation.id ?? citation.title ?? message
       )
-      if (seen.has(sourceUrl)) continue
-      seen.add(sourceUrl)
       const citationKey = citation.id ?? citation.deeplink ?? citation.videoUrl
+      if (seen.has(sourceUrl)) {
+        if (citationKey) {
+          sourceUrlByCitationKey.set(citationKey, sourceUrl)
+        }
+        if (citation.deeplink) {
+          sourceUrlByLinkKey.set(citation.deeplink, sourceUrl)
+        }
+        continue
+      }
+      seen.add(sourceUrl)
       if (citationKey) {
         sourceUrlByCitationKey.set(citationKey, sourceUrl)
+      }
+      if (citation.deeplink) {
+        sourceUrlByLinkKey.set(citation.deeplink, sourceUrl)
       }
 
       const resolvedDeeplink = buildOutlierDeeplinkUrl(citation.deeplink)
@@ -1545,12 +1631,10 @@ async function resolveChatLinksIntoSources(message: string, authToken: string, p
     return {
       imported: importedFromCitations,
       failed: [],
-      sections: buildAiRunSections(payload, sourceUrlByCitationKey),
+      sections: buildAiRunSections(payload, sourceUrlByCitationKey, relativeLinks, sourceUrlByLinkKey),
     }
   }
 
-  const rawText = typeof compactPayload.text === 'string' ? compactPayload.text : ''
-  const relativeLinks = rawText ? extractRelativeOutlierLinksFromText(rawText) : []
   if (relativeLinks.length > 0) {
     const importedFromLinks: ParsedOutlierSequence[] = []
     const failed: ImportFailure[] = []

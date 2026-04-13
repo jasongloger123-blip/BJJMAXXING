@@ -174,7 +174,7 @@ function customTechniqueToPickerTechnique(node: CustomTechniqueRecord): PickerTe
     stage: node.stage,
     track: node.track,
     level: node.level,
-    sourceNodeId: null,
+    sourceNodeId: node.id,
     outcome: `${node.title} sauber in deinen Plan integrieren.`,
     focus: [],
     mistakes: [],

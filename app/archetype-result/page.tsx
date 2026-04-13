@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ARCHETYPES } from '@/lib/archetypes'
 import { ArchetypeCard } from '@/components/ArchetypeCard'
-import { clearPendingArchetypeResult, readArchetypeResult, readPendingArchetypeResult, type ArchetypeResultData } from '@/lib/public-archetype-result'
+import { clearPendingArchetypeResult, readArchetypeResult, readPendingArchetypeResult, saveArchetypeResult, type ArchetypeResultData } from '@/lib/public-archetype-result'
 import { createClient } from '@/lib/supabase/client'
 
 export default function ArchetypeResultPage() {
@@ -19,6 +19,7 @@ export default function ArchetypeResultPage() {
 
   const loadResult = useCallback(async () => {
     const stored = readArchetypeResult()
+    const pending = readPendingArchetypeResult()
 
     const {
       data: { user },
@@ -26,7 +27,16 @@ export default function ArchetypeResultPage() {
 
     const isAuthenticated = Boolean(user)
     setAuthenticated(isAuthenticated)
-    setHasPendingSelection(Boolean(readPendingArchetypeResult()))
+    setHasPendingSelection(Boolean(pending))
+
+    // Wenn ein pending Result existiert und User eingeloggt ist, verwende das pending Result
+    if (pending && isAuthenticated) {
+      setResult(pending)
+      // Speichere es auch als reguläres Result
+      saveArchetypeResult(pending)
+      setLoading(false)
+      return
+    }
 
     if (!stored && !user) {
       router.push('/archetype-test')
@@ -88,8 +98,10 @@ export default function ArchetypeResultPage() {
 
     setSavingSelection(true)
 
+    // Speichere die Archetypen im Profil
     const { error } = await supabase.from('user_profiles').upsert({
       id: user.id,
+      email: user.email,
       primary_archetype: result.primary.id,
       secondary_archetype: result.secondary.id,
     })
@@ -102,12 +114,35 @@ export default function ArchetypeResultPage() {
     clearPendingArchetypeResult()
     setHasPendingSelection(false)
     window.dispatchEvent(new Event('profile-ready-changed'))
-    router.push('/')
+    // Leite zur Namensabfrage weiter, dann Onboarding für Gym
+    window.location.assign('/name-input')
   }
 
   useEffect(() => {
     void loadResult()
   }, [loadResult])
+
+  // Re-check authentication status periodically in case user just registered
+  useEffect(() => {
+    if (authenticated) return
+
+    const checkAuth = setInterval(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        setAuthenticated(true)
+        void loadResult()
+        clearInterval(checkAuth)
+      }
+    }, 500)
+
+    // Stop checking after 10 seconds
+    const timeout = setTimeout(() => clearInterval(checkAuth), 10000)
+
+    return () => {
+      clearInterval(checkAuth)
+      clearTimeout(timeout)
+    }
+  }, [authenticated, supabase, loadResult])
 
   if (loading || !result) {
     return <div className="min-h-screen bg-[#0d0b09]" />

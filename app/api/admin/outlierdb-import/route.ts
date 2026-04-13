@@ -5,6 +5,16 @@ import { isAdminEmail } from '@/lib/admin-access'
 import { importOutlierAiChat, importOutlierTagSearch } from '@/lib/outlierdb'
 import { normalizeTechniqueStyleCoverage } from '@/lib/technique-style'
 
+type ClipArchiveRow = {
+  id: string
+  external_source_id: string | null
+  source_url: string | null
+  video_url: string | null
+  timestamp_seconds: number | null
+  summary: string | null
+  hashtags: string[] | null
+}
+
 async function resolveAdmin(request: Request) {
   const supabase = createClient()
   const admin = createAdminClient()
@@ -29,6 +39,54 @@ async function resolveAdmin(request: Request) {
   } = await admin.auth.getUser(token)
 
   return { user: tokenUser ?? null, admin }
+}
+
+async function findExistingOutlierClip(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  sourceUrl: string,
+  videoUrl: string | null,
+  timestampSeconds: number | null
+) {
+  const applyTimestampFilter = (query: any) => {
+    if (timestampSeconds === null || timestampSeconds === undefined) {
+      return query.is('timestamp_seconds', null)
+    }
+
+    return query.eq('timestamp_seconds', timestampSeconds)
+  }
+
+  const sourceQuery = applyTimestampFilter(
+    admin
+      .from('clip_archive')
+      .select('id, external_source_id, source_url, video_url, timestamp_seconds, summary, hashtags')
+      .eq('provider', 'outlierdb')
+      .eq('source_url', sourceUrl)
+  ).limit(1)
+
+  const { data: sourceMatches, error: sourceError } = await sourceQuery
+  if (sourceError) {
+    throw new Error(sourceError.message)
+  }
+
+  const sourceMatch = (sourceMatches?.[0] ?? null) as ClipArchiveRow | null
+  if (sourceMatch || !videoUrl) {
+    return sourceMatch
+  }
+
+  const videoQuery = applyTimestampFilter(
+    admin
+      .from('clip_archive')
+      .select('id, external_source_id, source_url, video_url, timestamp_seconds, summary, hashtags')
+      .eq('provider', 'outlierdb')
+      .eq('video_url', videoUrl)
+  ).limit(1)
+
+  const { data: videoMatches, error: videoError } = await videoQuery
+  if (videoError) {
+    throw new Error(videoError.message)
+  }
+
+  return (videoMatches?.[0] ?? null) as ClipArchiveRow | null
 }
 
 export async function POST(request: Request) {
@@ -137,43 +195,102 @@ export async function POST(request: Request) {
       if ((upsertedRows ?? []).length > 0) {
         const importedBySourceUrl = new Map(result.imported.map((entry) => [entry.source_url, entry]))
 
-        const { error: clipArchiveError } = await admin.from('clip_archive').upsert(
-          upsertedRows.map((row) => {
-            const importedEntry = importedBySourceUrl.get(row.source_url)
-            return {
-              external_source_id: row.id,
-              source_run_id: runRow.id,
-              provider: importedEntry?.provider ?? 'outlierdb',
-              source_url: importedEntry?.source_url ?? row.source_url,
-              source_type: importedEntry?.source_type ?? 'sequence',
-              title: importedEntry?.title ?? row.source_url,
-              video_url: importedEntry?.video_url ?? null,
-              video_platform: importedEntry?.video_platform ?? null,
-              video_format: importedEntry?.video_format ?? null,
-              style_coverage: styleCoverage,
-              timestamp_label: importedEntry?.timestamp_label ?? null,
-              timestamp_seconds: importedEntry?.timestamp_seconds ?? null,
-              hashtags: importedEntry?.hashtags ?? [],
-              summary: importedEntry?.summary ?? null,
-              search_query: importedEntry?.search_query ?? query,
-              raw_payload: importedEntry?.raw_payload ?? {},
-              last_seen_at: now,
-            }
-          }),
-          {
-            onConflict: 'external_source_id',
-            ignoreDuplicates: false,
+        for (const row of upsertedRows) {
+          const importedEntry = importedBySourceUrl.get(row.source_url)
+          const clipRow = {
+            external_source_id: row.id,
+            source_run_id: runRow.id,
+            provider: importedEntry?.provider ?? 'outlierdb',
+            source_url: importedEntry?.source_url ?? row.source_url,
+            source_type: importedEntry?.source_type ?? 'sequence',
+            title: importedEntry?.title ?? row.source_url,
+            video_url: importedEntry?.video_url ?? null,
+            video_platform: importedEntry?.video_platform ?? null,
+            video_format: importedEntry?.video_format ?? null,
+            style_coverage: styleCoverage,
+            content_type: 'technical_demo',
+            learning_phase: 'core_mechanic',
+            target_archetype_ids: [],
+            timestamp_label: importedEntry?.timestamp_label ?? null,
+            timestamp_seconds: importedEntry?.timestamp_seconds ?? null,
+            hashtags: importedEntry?.hashtags ?? [],
+            summary: importedEntry?.summary ?? null,
+            search_query: importedEntry?.search_query ?? query,
+            raw_payload: importedEntry?.raw_payload ?? {},
+            last_seen_at: now,
           }
-        )
 
-        if (clipArchiveError) {
-          return NextResponse.json(
-            {
-              error: clipArchiveError.message,
-              hint: 'Pruefe, ob die Migration 20260404_clip_archive.sql in Supabase ausgefuehrt wurde.',
-            },
-            { status: 500 }
-          )
+          try {
+            const existingClip = await findExistingOutlierClip(
+              admin,
+              clipRow.source_url,
+              clipRow.video_url,
+              clipRow.timestamp_seconds
+            )
+
+            if (existingClip) {
+              const existingClipUpdate = {
+                external_source_id: clipRow.external_source_id,
+                source_run_id: clipRow.source_run_id,
+                provider: clipRow.provider,
+                source_url: clipRow.source_url,
+                source_type: clipRow.source_type,
+                title: clipRow.title,
+                video_url: clipRow.video_url,
+                video_platform: clipRow.video_platform,
+                video_format: clipRow.video_format,
+                style_coverage: clipRow.style_coverage,
+                timestamp_label: clipRow.timestamp_label,
+                timestamp_seconds: clipRow.timestamp_seconds,
+                search_query: clipRow.search_query,
+                raw_payload: clipRow.raw_payload,
+                last_seen_at: clipRow.last_seen_at,
+              }
+              const { error: updateError } = await admin
+                .from('clip_archive')
+                .update({
+                  ...existingClipUpdate,
+                  summary: existingClip.summary?.trim() ? existingClip.summary : clipRow.summary,
+                  hashtags: (existingClip.hashtags?.length ?? 0) > 0 ? existingClip.hashtags : clipRow.hashtags,
+                })
+                .eq('id', existingClip.id)
+
+              if (updateError) {
+                return NextResponse.json(
+                  {
+                    error: updateError.message,
+                    hint: 'Pruefe, ob die Migration 20260404_clip_archive.sql in Supabase ausgefuehrt wurde.',
+                  },
+                  { status: 500 }
+                )
+              }
+
+              continue
+            }
+
+            const { error: clipArchiveError } = await admin.from('clip_archive').upsert(clipRow, {
+              onConflict: 'external_source_id',
+              ignoreDuplicates: false,
+            })
+
+            if (clipArchiveError) {
+              return NextResponse.json(
+                {
+                  error: clipArchiveError.message,
+                  hint: 'Pruefe, ob die Migration 20260404_clip_archive.sql in Supabase ausgefuehrt wurde.',
+                },
+                { status: 500 }
+              )
+            }
+          } catch (dedupeError) {
+            return NextResponse.json(
+              {
+                error: dedupeError instanceof Error ? dedupeError.message : 'Clip-Dedupe fehlgeschlagen.',
+                hint: 'OutlierDB Import prueft Clips jetzt vor dem Anlegen nach URL und Timestamp.',
+              },
+              { status: 500 }
+            )
+          }
         }
 
         const { error: linkError } = await admin.from('external_technique_search_run_sources').upsert(

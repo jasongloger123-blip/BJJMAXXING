@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight, Clock3 } from 'lucide-react'
+import { Clock3, Link2 } from 'lucide-react'
 import { SavedClipButton } from '@/components/SavedClipButton'
 import type { SavedClipPreview } from '@/lib/saved-clips'
 import { SAVED_CLIPS_EVENT } from '@/lib/saved-clips'
@@ -203,7 +203,19 @@ export function ProfileSavedClips() {
                           </div>
                           <h3 className="mt-2 line-clamp-2 text-lg font-black tracking-[-0.03em] text-white">{clip.title}</h3>
                         </div>
-                        <SavedClipButton clipId={clip.id} className="h-10 w-10 shrink-0" />
+                        <div className="flex items-center gap-2">
+                          <SavedClipButton clipId={clip.id} className="h-10 w-10 shrink-0" />
+                          <a
+                            href={videoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-bjj-gold/20 bg-bjj-gold/10 text-bjj-gold transition hover:bg-bjj-gold/16"
+                            title="Original Video oeffnen"
+                            aria-label="Original Video oeffnen"
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </a>
+                        </div>
                       </div>
 
                       <p className="mt-3 line-clamp-3 text-sm leading-7 text-white/68">
@@ -217,15 +229,6 @@ export function ProfileSavedClips() {
                         >
                           Clip oeffnen
                         </Link>
-                        <a
-                          href={videoUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center justify-center gap-2 rounded-full border border-bjj-gold/20 bg-bjj-gold/10 px-4 py-2 text-sm font-semibold text-bjj-gold"
-                        >
-                          Original
-                          <ArrowUpRight className="h-4 w-4" />
-                        </a>
                       </div>
                     </div>
                   </article>

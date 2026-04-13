@@ -18,6 +18,8 @@ export type GameplanSourceNodeMeta = {
   id: string
   title?: string | null
   completionRuleIds: string[]
+  clipTotal?: number
+  knownClipCount?: number
 }
 
 export type PlanNode = {
@@ -331,8 +333,18 @@ function withResolvedStates(
     .filter((node) => node.unlockPhase === 'expansion')
     .sort((a, b) => (a.unlockOrder ?? 0) - (b.unlockOrder ?? 0))
 
-  const getSnapshot = (node: PlanNode) =>
-    progressLookup.get(resolveSourceNodeId(node)) ?? { completed: false, validated: false }
+  const getSnapshot = (node: PlanNode) => {
+    const sourceNodeId = resolveSourceNodeId(node)
+    const snapshot = progressLookup.get(sourceNodeId)
+    const sourceMeta = sourceNodeMetaById[sourceNodeId]
+    const completedByClips = Boolean(sourceMeta?.clipTotal && sourceMeta.clipTotal > 0 && (sourceMeta.knownClipCount ?? 0) >= sourceMeta.clipTotal)
+
+    return {
+      ...snapshot,
+      completed: Boolean(snapshot?.completed) || completedByClips,
+      validated: Boolean(snapshot?.validated) || completedByClips,
+    }
+  }
   const isNodeCompleted = (node: PlanNode) => getSnapshot(node).completed
   const isNodeResolved = (node: PlanNode) => {
     const snapshot = getSnapshot(node)
@@ -469,11 +481,12 @@ function withResolvedStates(
     const sourceMeta = sourceNodeMetaById[sourceNodeId]
     const snapshot = progressLookup.get(sourceNodeId)
     const completionRuleIds = sourceMeta?.completionRuleIds ?? []
+    const clipTotal = sourceMeta?.clipTotal ?? 0
     const completedRuleCount = completionRuleIds.filter((ruleId) => Boolean(snapshot?.[ruleId as keyof typeof snapshot])).length
     const validationTotal = node.requiresValidation ? 1 : 0
     const validationCompleted = node.requiresValidation && snapshot?.validated ? 1 : 0
-    const progressTotalRules = completionRuleIds.length + validationTotal
-    const progressCompletedRules = completedRuleCount + validationCompleted
+    const progressTotalRules = clipTotal > 0 ? clipTotal : completionRuleIds.length + validationTotal
+    const progressCompletedRules = clipTotal > 0 ? Math.min(clipTotal, sourceMeta?.knownClipCount ?? 0) : completedRuleCount + validationCompleted
     const progressPercent =
       progressTotalRules > 0
         ? Math.max(0, Math.min(100, Math.round((progressCompletedRules / progressTotalRules) * 100)))

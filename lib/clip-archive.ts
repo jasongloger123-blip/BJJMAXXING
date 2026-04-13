@@ -1,6 +1,7 @@
 import type { CuratedClip } from '@/lib/curated-clips'
 import { normalizeHashtags } from '@/lib/external-technique-sources'
 import { detectVideoFormat, getVideoPlatform, type ClipVideoFormat } from '@/lib/video-format'
+import type { ClipContentType, ClipLearningPhase } from '@/lib/clip-taxonomy'
 
 export const CLIP_ARCHIVE_STATUSES = ['unassigned', 'assigned', 'hidden', 'archived'] as const
 export const CLIP_ASSIGNMENT_KINDS = ['node', 'connection'] as const
@@ -19,6 +20,9 @@ export type ClipArchiveRecord = {
   video_url: string | null
   video_platform: string | null
   video_format?: ClipVideoFormat | null
+  content_type?: ClipContentType | null
+  learning_phase?: ClipLearningPhase | null
+  target_archetype_ids?: string[]
   timestamp_label: string | null
   timestamp_seconds: number | null
   hashtags: string[]
@@ -26,6 +30,8 @@ export type ClipArchiveRecord = {
   search_query: string | null
   raw_payload: Record<string, unknown>
   assignment_status: ClipArchiveStatus
+  assignment_id?: string
+  assignment_role?: ClipAssignmentRecord['role']
   created_at: string
   last_seen_at: string
 }
@@ -39,6 +45,9 @@ export type ClipAssignmentRecord = {
   to_node_id: string | null
   role: 'main_reference' | 'counter_reference' | 'drill_reference' | 'related_reference' | null
   display_order: number
+  content_type?: ClipContentType | null
+  learning_phase?: ClipLearningPhase | null
+  target_archetype_ids?: string[]
   notes: string | null
   created_at: string
 }

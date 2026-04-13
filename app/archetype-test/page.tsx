@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft } from 'lucide-react'
+
 import { QUESTIONS, calculateArchetype } from '@/lib/archetypes'
 import { saveArchetypeResult } from '@/lib/public-archetype-result'
 import { createClient } from '@/lib/supabase/client'
@@ -60,101 +60,87 @@ export default function ArchetypeTestPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0d0b09] text-white">
-      <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-10 md:px-8">
-        <section className="relative w-full overflow-hidden rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-8 shadow-card md:px-10 md:py-10">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(circle_at_top,rgba(217,159,92,0.2),transparent_72%)]" />
+    <div className="min-h-screen bg-[#0a0908] text-white">
+      <main className="mx-auto flex min-h-screen w-full max-w-5xl items-center px-4 py-8 md:px-8">
+        <div className="w-full">
+          {/* Header */}
+          <div className="mb-8 flex items-center justify-between">
+            <div className="text-sm font-bold text-bjj-gold">
+              Frage {currentStep + 1} / {QUESTIONS.length}
+            </div>
+            {!authenticated && (
+              <Link
+                href="/login"
+                className="rounded-xl bg-bjj-gold px-4 py-2 text-sm font-bold text-black transition hover:bg-bjj-gold/90"
+              >
+                Login
+              </Link>
+            )}
+          </div>
 
-          <div className="relative flex flex-col gap-8">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Schritt 2</p>
-                <h1 className="mt-3 text-4xl font-black tracking-[-0.04em] md:text-6xl">Welcher Archetyp passt zu dir?</h1>
-                <p className="mt-4 max-w-2xl text-sm leading-7 text-white/64 md:text-base">
-                  Beantworte ein paar kurze Fragen und wir legen deinen Startpunkt im System direkt passend fest.
-                </p>
-              </div>
+          {/* Title */}
+          <h1 className="mb-6 text-3xl font-black tracking-tight md:text-5xl">
+            Welcher BJJ-Typ bist du?
+          </h1>
 
-              <div className="flex items-center gap-3 self-start">
-                <Link
-                  href={authenticated ? '/' : '/'}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-[#1a1714] px-4 py-3 text-sm font-bold text-white/70 transition hover:border-bjj-gold/25 hover:text-white"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Zurueck
-                </Link>
-                {!authenticated ? (
-                  <Link
-                    href="/login"
-                    className="inline-flex rounded-2xl border border-bjj-gold/20 bg-[rgba(212,135,95,0.12)] px-4 py-3 text-sm font-black uppercase tracking-[0.12em] text-bjj-gold transition hover:bg-[rgba(212,135,95,0.18)]"
+          {/* Progress bar */}
+          <div className="mb-8 h-1.5 w-full rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-bjj-gold transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+
+          {/* Question Card - Cleaner design */}
+          <div className="mb-6">
+            <h2 className="mb-6 text-xl font-bold md:text-2xl">{question.question}</h2>
+            {question.helper ? <p className="mb-6 text-white/60">{question.helper}</p> : null}
+
+            <div className={`grid gap-3 ${optionGridClass}`}>
+              {question.options.map((option, index) => {
+                const active = answers[question.id] === index
+
+                return (
+                  <button
+                    key={option.label}
+                    type="button"
+                    onClick={() => void handleAnswer(index)}
+                    disabled={loading}
+                    className={`rounded-xl p-4 text-left transition ${
+                      active
+                        ? 'bg-bjj-gold text-black'
+                        : 'bg-white/5 hover:bg-white/10'
+                    }`}
                   >
-                    Login
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-full bg-black/30">
-              <div className="h-2 rounded-full bg-[linear-gradient(90deg,#d99f5c,#f0c27b)] transition-all duration-500" style={{ width: `${progress}%` }} />
-            </div>
-
-            <div className="rounded-[2rem] border border-[rgba(212,135,95,0.14)] bg-[linear-gradient(180deg,rgba(28,21,16,0.96),rgba(20,15,12,0.98))] p-5 md:p-7">
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-bjj-gold">
-                Frage {String(currentStep + 1).padStart(2, '0')} von {String(QUESTIONS.length).padStart(2, '0')}
-              </p>
-              <h2 className="mt-3 max-w-3xl text-2xl font-black tracking-[-0.03em] md:text-4xl">{question.question}</h2>
-              {question.helper ? <p className="mt-3 max-w-2xl text-sm leading-7 text-white/64 md:text-base">{question.helper}</p> : null}
-
-              <div className={`mt-8 grid gap-4 ${optionGridClass}`}>
-                {question.options.map((option, index) => {
-                  const active = answers[question.id] === index
-
-                  return (
-                    <button
-                      key={option.label}
-                      type="button"
-                      onClick={() => void handleAnswer(index)}
-                      disabled={loading}
-                      className={`rounded-[1.8rem] border px-5 py-5 text-left transition md:px-6 md:py-6 ${
-                        active
-                          ? 'border-bjj-gold/40 bg-bjj-gold/10 shadow-orange-glow-sm'
-                          : 'border-white/8 bg-[#171310] hover:border-bjj-gold/20 hover:bg-[#1d1713]'
-                      }`}
-                    >
-                      <div className="flex items-start gap-4">
-                        {option.icon ? (
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-bjj-gold/20 bg-bjj-gold/10 text-lg font-black text-bjj-gold">
-                            <span aria-hidden="true">{option.icon}</span>
-                          </div>
-                        ) : null}
-                        <div className="min-w-0">
-                          <div className="text-lg font-black text-white md:text-xl">{option.label}</div>
-                          <div className="mt-2 text-sm leading-6 text-white/64 md:text-base">{option.description}</div>
-                        </div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="flex min-h-10 items-center justify-between gap-4">
-              {currentStep > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setCurrentStep((value) => value - 1)}
-                  className="text-sm font-bold text-white/60 transition hover:text-white"
-                >
-                  Zurueck zur vorherigen Frage
-                </button>
-              ) : (
-                <div />
-              )}
-
-              {loading ? <p className="text-sm font-semibold text-bjj-gold">Analyse wird vorbereitet...</p> : null}
+                    <div className="flex items-center gap-3">
+                      {option.icon ? (
+                        <span className="text-xl">{option.icon}</span>
+                      ) : null}
+                      <span className="font-bold">{option.label}</span>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </div>
-        </section>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between">
+            {currentStep > 0 ? (
+              <button
+                type="button"
+                onClick={() => setCurrentStep((value) => value - 1)}
+                className="text-sm text-white/60 transition hover:text-white"
+              >
+                ← Zurück
+              </button>
+            ) : (
+              <div />
+            )}
+
+            {loading && <span className="text-sm text-bjj-gold">Analysiere...</span>}
+          </div>
+        </div>
       </main>
     </div>
   )
