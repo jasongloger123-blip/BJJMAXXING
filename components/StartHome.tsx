@@ -2144,8 +2144,8 @@ export default function StartHome() {
           <h1 className="text-xl font-bold text-white lg:text-2xl">{activeVideoHeading}</h1>
         </header>
 
-        <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_240px]">
-          {/* Left: Video + Info */}
+        <div className="relative">
+          {/* Video + Info */}
           <div className={`space-y-4 start-home-slide transition-all duration-500 ${transitionPhase === 'out' ? 'start-home-slide-out' : ''} ${transitionPhase === 'prepare' ? 'start-home-slide-in' : ''}`}>
             {/* Video Player */}
             <div
@@ -2313,54 +2313,57 @@ export default function StartHome() {
               </div>
             )}
 
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-bjj-gold/80">Debug Queue</p>
-                <div className="flex rounded-lg border border-white/10 bg-black/20 p-1">
-                  {[
-                    ['normal', 'Normal'],
-                    ['new', 'Nur neue'],
-                  ].map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => handleDebugQueueModeChange(mode as 'normal' | 'new')}
-                      className={`rounded-md px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] transition ${
-                        debugQueueMode === mode ? 'bg-bjj-gold/20 text-bjj-gold' : 'text-white/42 hover:text-white/72'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+            {/* Debug Queue - Nur für Admins */}
+            {isAdmin && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-bjj-gold/80">Debug Queue</p>
+                  <div className="flex rounded-lg border border-white/10 bg-black/20 p-1">
+                    {[
+                      ['normal', 'Normal'],
+                      ['new', 'Nur neue'],
+                    ].map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => handleDebugQueueModeChange(mode as 'normal' | 'new')}
+                        className={`rounded-md px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] transition ${
+                          debugQueueMode === mode ? 'bg-bjj-gold/20 text-bjj-gold' : 'text-white/42 hover:text-white/72'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="w-full text-[11px] font-semibold text-white/42">Top {debugQueueCards.length} aus der Start-Queue</p>
                 </div>
-                <p className="w-full text-[11px] font-semibold text-white/42">Top {debugQueueCards.length} aus der Start-Queue</p>
-              </div>
-              <div className="mt-3 grid gap-2">
-                {debugQueueCards.map((card, index) => {
-                  const isCurrent = visibleCard?.id === card.id || visibleCard?.videoKey === card.videoKey
-                  const givesProgress = givesNewProgress(card)
-                  return (
-                    <div key={`${card.id}-${index}`} className={`rounded-lg border px-3 py-2 text-xs ${isCurrent ? 'border-bjj-gold/45 bg-bjj-gold/10' : 'border-white/8 bg-black/12'}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-bold text-white/86">{index + 1}. {card.title}</p>
-                        <span className={`rounded-md px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${givesProgress ? 'bg-green-500/15 text-green-300' : 'bg-white/8 text-white/46'}`}>
-                          {givesProgress ? 'Unlock-Fortschritt' : 'kein neuer Fortschritt'}
-                        </span>
+                <div className="mt-3 grid gap-2">
+                  {debugQueueCards.map((card, index) => {
+                    const isCurrent = visibleCard?.id === card.id || visibleCard?.videoKey === card.videoKey
+                    const givesProgress = givesNewProgress(card)
+                    return (
+                      <div key={`${card.id}-${index}`} className={`rounded-lg border px-3 py-2 text-xs ${isCurrent ? 'border-bjj-gold/45 bg-bjj-gold/10' : 'border-white/8 bg-black/12'}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-bold text-white/86">{index + 1}. {card.title}</p>
+                          <span className={`rounded-md px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${givesProgress ? 'bg-green-500/15 text-green-300' : 'bg-white/8 text-white/46'}`}>
+                            {givesProgress ? 'Unlock-Fortschritt' : 'kein neuer Fortschritt'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-white/62">{card.clipTitle || 'Kein Clip-Titel'}</p>
+                        <p className="mt-1 break-all font-mono text-[10px] text-white/36">
+                          node={card.nodeId} key={card.videoKey} type={card.type} clip={card.clipId ?? 'fallback'}
+                        </p>
                       </div>
-                      <p className="mt-1 text-white/62">{card.clipTitle || 'Kein Clip-Titel'}</p>
-                      <p className="mt-1 break-all font-mono text-[10px] text-white/36">
-                        node={card.nodeId} key={card.videoKey} type={card.type} clip={card.clipId ?? 'fallback'}
-                      </p>
-                    </div>
-                  )
-                })}
-                {debugQueueCards.length === 0 ? (
-                  <p className="rounded-lg border border-white/8 bg-black/12 px-3 py-2 text-xs text-white/46">
-                    Keine neuen Videos mit Unlock-Fortschritt in der aktuellen Queue.
-                  </p>
-                ) : null}
+                    )
+                  })}
+                  {debugQueueCards.length === 0 ? (
+                    <p className="rounded-lg border border-white/8 bg-black/12 px-3 py-2 text-xs text-white/46">
+                      Keine neuen Videos mit Unlock-Fortschritt in der aktuellen Queue.
+                    </p>
+                  ) : null}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/58">
@@ -2383,84 +2386,27 @@ export default function StartHome() {
               </div>
             </div>
 
-            {/* Mobile Buttons - Centered below video, same size */}
-            <div className="flex justify-center gap-4 lg:hidden">
-              <button
-                type="button"
-                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
-                onClick={() => handleAnimatedQueueAction('not_yet')}
-                className={`start-home-action-btn start-home-action-btn-negative flex h-28 w-40 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
-              >
-                <X className="h-8 w-8 text-red-400" />
-                <p className="mt-2 text-base font-bold text-white">Kann ich nicht</p>
-              </button>
-
-              <button
-                type="button"
-                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
-                onClick={() => handleAnimatedQueueAction('known')}
-                className={`start-home-action-btn start-home-action-btn-positive flex h-28 w-40 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
-              >
-                <Check className="h-8 w-8 text-green-400" />
-                <p className="mt-2 text-base font-bold text-white">Kann ich</p>
-              </button>
-            </div>
-
-            {/* Video Info */}
-            <div className="space-y-3 pt-2">
-              {!visibleCardResolvedClip?.usesAssignedClip && visibleCardResolvedClip?.url && (
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/42">
-                  Ersatz-Clip, weil fuer diese Technik noch kein eigener Startseiten-Clip hinterlegt ist
-                </p>
-              )}
-              {visibleCard.clipDescription || visibleCard.clipHashtags?.length ? (
-                <div className="space-y-2 text-sm leading-6 text-white/58">
-                  {visibleCard.clipDescription ? <p>{visibleCard.clipDescription}</p> : null}
-                  {visibleCard.clipHashtags?.length ? (
-                    <p className="flex flex-wrap gap-2">
-                      {visibleCard.clipHashtags.slice(0, 8).map((tag) => (
-                        <span key={tag} className="rounded-md bg-white/[0.06] px-2 py-1 text-xs font-semibold text-white/58">
-                          #{tag.replace(/^#/, '')}
-                        </span>
-                      ))}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-              {/* Links only - no tags */}
-              <div className="flex flex-wrap gap-3">
-                <Link 
-                  href={`/node/${visibleCard.nodeId}`} 
-                  className="inline-flex items-center gap-2 rounded-lg bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  Technik oeffnen
-                  <ArrowUpRight className="h-4 w-4" />
-                </Link>
-              </div>
-            </div>
-
           </div>
 
-          {/* Right: Clean Action Buttons (Desktop) - Centered, same size */}
-          <div className="hidden flex-col items-center justify-center gap-4 lg:flex">
+          {/* Action Buttons unter dem Video - wie im Bild */}
+          <div className="mt-4 flex h-14 w-full overflow-hidden rounded-lg">
             <button
               type="button"
               disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
               onClick={() => handleAnimatedQueueAction('not_yet')}
-              className={`start-home-action-btn start-home-action-btn-negative flex h-36 w-56 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
+              className={`flex flex-1 items-center justify-center gap-2 bg-red-500/20 text-base font-semibold text-white transition hover:bg-red-500/30 disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
             >
-              <X className="h-10 w-10 text-red-400" />
-              <p className="mt-3 text-lg font-bold text-white">Kann ich nicht</p>
+              <X className="h-5 w-5 text-red-400" />
+              <span>Kann ich nicht</span>
             </button>
-
             <button
               type="button"
               disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
               onClick={() => handleAnimatedQueueAction('known')}
-              className={`start-home-action-btn start-home-action-btn-positive flex h-36 w-56 flex-col items-center justify-center rounded-xl text-center disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
+              className={`flex flex-1 items-center justify-center gap-2 bg-green-500/20 text-base font-semibold text-white transition hover:bg-green-500/30 disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
             >
-              <Check className="h-10 w-10 text-green-400" />
-              <p className="mt-3 text-lg font-bold text-white">Kann ich</p>
+              <Check className="h-5 w-5 text-green-400" />
+              <span>Kann ich</span>
             </button>
           </div>
 
