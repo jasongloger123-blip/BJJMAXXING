@@ -21,6 +21,14 @@ const fullNavItems = [
   { href: '/pricing', label: 'Upgrade', icon: Sparkles },
 ]
 
+// Mobile Navigation: nur 4 Haupt-Tabs
+const mobileNavItems = [
+  { href: '/', label: 'Start', icon: Home },
+  { href: '/gameplan', label: 'Gameplan', icon: Waypoints },
+  { href: '/technique-library', label: 'Techniken', icon: BookOpen },
+  { href: '/profile', label: 'Profil', icon: User2 },
+]
+
 type LayoutProfile = {
   username?: string | null
   full_name?: string | null
@@ -353,44 +361,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </aside>
 
           <div className={contentOffsetClass}>
-            <header className="sticky top-0 z-20 border-b border-bjj-border bg-bjj-bg/92 backdrop-blur lg:hidden">
-              <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-6">
-                <Link href="/" className="flex items-center gap-3 text-white">
-                  <span className="flex items-center justify-center overflow-hidden rounded-2xl border border-bjj-gold/20 bg-[linear-gradient(180deg,rgba(245,158,11,0.12),rgba(26,34,48,0.72))] px-3 py-2">
-                    <img
-                      src={SIDEBAR_LOGO_SRC}
-                      alt="BJJMAXXING Logo"
-                      className="h-12 w-[168px] object-contain"
-                    />
-                  </span>
-                  <span className="sr-only">BJJMAXXING</span>
-                </Link>
-
-                <div className="flex items-center gap-3">
-                  <Link
-                    href="/notifications"
-                    className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-bjj-border bg-bjj-card text-bjj-muted transition-colors hover:text-bjj-text"
-                    aria-label="Benachrichtigungen"
-                  >
-                    <Bell className="h-5 w-5" />
-                    {unreadNotifications > 0 ? (
-                      <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-bjj-gold px-1 text-[10px] font-black text-bjj-coal">
-                        {unreadNotifications}
-                      </span>
-                    ) : null}
-                  </Link>
-
-                  <button
-                    onClick={handleLogout}
-                    className="rounded-2xl border border-bjj-border bg-bjj-card px-4 py-3 text-sm font-semibold text-bjj-muted transition-colors hover:text-bjj-text"
-                  >
-                    Ausloggen
-                  </button>
-                </div>
+            {/* Mobile Bottom Navigation - nur sichtbar auf kleinen Screens */}
+            <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-bjj-border bg-bjj-bg/95 backdrop-blur lg:hidden">
+              <div className="mx-auto flex max-w-md items-center justify-around px-2 py-2">
+                {mobileNavItems.map((item) => {
+                  const Icon = item.icon
+                  const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex flex-col items-center gap-1 px-3 py-2 transition-colors ${
+                        isActive ? 'text-bjj-gold' : 'text-bjj-muted'
+                      }`}
+                    >
+                      <Icon className="h-6 w-6" />
+                      <span className="text-[10px] font-semibold">{item.label}</span>
+                    </Link>
+                  )
+                })}
               </div>
-            </header>
+            </nav>
 
-            <main className={showGameplanSidebar && isGameplanImmersive ? 'w-full overflow-hidden px-0 py-0 lg:h-screen' : 'w-full px-4 py-6 md:px-6 md:py-8 lg:py-6'}>
+            <main className={`${showGameplanSidebar && isGameplanImmersive ? 'w-full overflow-hidden px-0 py-0 lg:h-screen' : 'w-full px-4 py-6 md:px-6 md:py-8 lg:py-6'} pb-20 lg:pb-6`}>
               {children}
             </main>
           </div>
