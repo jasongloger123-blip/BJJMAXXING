@@ -509,7 +509,7 @@ export function buildStartQueue(
     ]
   }
 
-  const activeCards = orderedVideos.map((video, queueIndex): QueueCard => {
+  const activeCards = orderedVideos.slice(0, 1).map((video, queueIndex): QueueCard => {
     const status = statusByKey.get(video.key)
     const learningStatus = getLearningStatus(status)
     const isDue = Boolean(status && status.next_review_step <= currentStep)
@@ -636,5 +636,10 @@ export function buildStartQueue(
       ]
     })
 
-  return [...activeCards, ...reviewCards]
+  // Maximal 5 Karten: 1 Hauptkarte + bis zu 4 Review-Karten
+  // Die erste Karte ist immer vom aktiven Node, die restlichen von anderen Nodes
+  const maxReviewCards = 4
+  const limitedReviewCards = reviewCards.slice(0, maxReviewCards)
+  
+  return [...activeCards, ...limitedReviewCards]
 }
