@@ -31,22 +31,34 @@ function LoginPageContent() {
     setError(null)
 
     try {
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password: password.trim(),
+      // Use server API for login to set HTTP-only cookies
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password: password.trim(),
+        }),
       })
 
-      if (signInError) {
-        const message = signInError.message.toLowerCase().includes('email not confirmed')
-          ? 'Diese E-Mail ist noch nicht bestaetigt. Registriere dich bitte noch einmal, damit der Account repariert wird.'
-          : signInError.message ?? 'Login fehlgeschlagen.'
+      const data = await response.json()
 
+      if (!response.ok) {
+        const message = data.error?.toLowerCase().includes('email not confirmed')
+          ? 'Diese E-Mail ist noch nicht bestaetigt. Registriere dich bitte noch einmal, damit der Account repariert wird.'
+          : data.error ?? 'Login fehlgeschlagen.'
         setError(message)
         setLoading(false)
         return
       }
 
-      // Ensure session is persisted in cookies
+      // Now set the session in the browser client
+      const { data: signInData } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
+      })
+
       if (signInData.session) {
         await supabase.auth.setSession({
           access_token: signInData.session.access_token,
@@ -54,7 +66,7 @@ function LoginPageContent() {
         })
       }
 
-      // Sync the browser client with the server-set auth cookie before redirecting.
+      // Sync and redirect
       await supabase.auth.getSession()
       await waitForAuthenticatedUser(supabase, 8, 250)
 
