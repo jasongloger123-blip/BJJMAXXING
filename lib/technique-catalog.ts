@@ -209,8 +209,8 @@ export function getTechniqueCatalogEntryForPlanNode(node?: Pick<PlanNode, 'id' |
     }
   }
 
-  const normalizedTitle = node.title.trim().toLowerCase()
-  const normalizedLabel = node.label.trim().toLowerCase()
+  const normalizedTitle = (node.title ?? '').trim().toLowerCase()
+  const normalizedLabel = (node.label ?? '').trim().toLowerCase()
   const customTechniques = readCustomTechniques()
   const matchedCustomTechnique = customTechniques.find((technique) => {
     const titleMatches = technique.title.trim().toLowerCase() === normalizedTitle

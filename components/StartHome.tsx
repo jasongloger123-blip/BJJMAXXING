@@ -421,25 +421,56 @@ export default function StartHome() {
 
   const loadServerQueue = useCallback(async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
+      // Try to get session from Supabase client (works in normal browser)
+      const { data: { session } } = await supabase.auth.getSession()
       
-      console.log('StartHome: Session check:', { 
+      // Also try to manually read auth cookie from document (for cross-browser compatibility)
+      const getCookie = (name: string) => {
+        if (typeof document === 'undefined') return null
+        const value = `; ${document.cookie}`
+        const parts = value.split(`; ${name}=`)
+        if (parts.length === 2) return parts.pop()?.split(';').shift() || null
+        return null
+      }
+      
+      // Try to find Supabase auth cookie
+      const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1]
+      const cookieName = `sb-${projectRef}-auth-token`
+      const authCookie = getCookie(cookieName)
+      
+      console.log('StartHome: Auth check:', { 
         hasSession: !!session, 
-        hasAccessToken: !!session?.access_token,
+        hasCookie: !!authCookie,
+        cookieName,
         userId: session?.user?.id 
       })
       
       const headers: Record<string, string> = {}
+      
+      // Prefer Authorization header from session
       if (session?.access_token) {
         headers.Authorization = `Bearer ${session.access_token}`
+        console.log('StartHome: Using session token')
+      } else if (authCookie) {
+        // Try to parse cookie and extract token
+        try {
+          const parsedCookie = JSON.parse(decodeURIComponent(authCookie))
+          const token = typeof parsedCookie === 'string' ? parsedCookie : parsedCookie.access_token
+          if (token) {
+            headers.Authorization = `Bearer ${token}`
+            console.log('StartHome: Using cookie token')
+          }
+        } catch (e) {
+          console.log('StartHome: Failed to parse auth cookie')
+        }
+      } else {
+        console.log('StartHome: No auth available - requesting as guest')
       }
 
       const response = await fetch('/api/start-queue', { 
         cache: 'no-store', 
         headers,
-        credentials: 'include' // Important: send cookies
+        credentials: 'include' // Always include cookies
       })
       
       console.log('StartHome: API response status:', response.status)
@@ -863,11 +894,11 @@ export default function StartHome() {
     .join('')
     .slice(0, 2)
     .toUpperCase()
-  const quickDetails = primaryCard
-    ? primaryCard.keyPoints.slice(0, 2).length
-      ? primaryCard.keyPoints.slice(0, 2)
-      : [{ label: 'Focus', items: [primaryCard.principle] }]
-    : []
+  const quickDetails = primaryCard?.keyPoints?.length
+    ? primaryCard.keyPoints.slice(0, 2)
+    : primaryCard?.principle
+      ? [{ label: 'Focus', items: [primaryCard.principle] }]
+      : []
   const overallProgress = useMemo(() => {
     const baseline = completedIds.length + validatedIds.length
     const total = Math.max(flowSteps.length, 1)
@@ -1135,7 +1166,7 @@ export default function StartHome() {
       debugQueueMode === 'new'
         ? getDebugQueueCardsForMode(debugQueueMode).filter((card) => givesNewProgress(card))
         : getDebugQueueCardsForMode(debugQueueMode)
-    return cards.slice(0, 8)
+    return cards.slice(0, 5) // Changed from 8 to 5
   }, [debugQueueMode, effectiveActivePlan?.nodes, events, queue])
 
   function bumpClipProgressForCard(card: QueueCard) {
