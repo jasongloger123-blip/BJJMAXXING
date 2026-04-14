@@ -54,7 +54,7 @@ function getScoreTone(value: number) {
 }
 
 export default function AdminUserQueuePage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [userQuery, setUserQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

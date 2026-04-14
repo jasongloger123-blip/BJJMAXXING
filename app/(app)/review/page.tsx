@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 export default function ReviewPage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [videoUrl, setVideoUrl] = useState('')
   const [notes, setNotes] = useState('')
   const [reviewType, setReviewType] = useState<'manual' | 'ai'>('manual')

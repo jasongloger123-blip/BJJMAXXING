@@ -56,7 +56,7 @@ const BELT_NAMES: Record<string, string> = {
 
 export default function AdminProfilesDashboardPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   
   const [profiles, setProfiles] = useState<ProfileWithStats[]>([])
   const [loading, setLoading] = useState(true)

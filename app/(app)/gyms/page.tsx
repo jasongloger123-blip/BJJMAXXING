@@ -38,7 +38,7 @@ type Gym = {
 
 export default function GymsPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   
   const [gyms, setGyms] = useState<Gym[]>([])
   const [filteredGyms, setFilteredGyms] = useState<Gym[]>([])

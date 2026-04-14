@@ -356,7 +356,7 @@ function SourceCard({
 }
 
 export default function AdminOutlierDbPage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [customTechniques, setCustomTechniques] = useState(() => readCustomTechniques())
   const [mode, setMode] = useState<ExternalSearchMode>('tag_search')
   const [label, setLabel] = useState('Nogi Resources')

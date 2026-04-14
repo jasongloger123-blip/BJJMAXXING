@@ -134,7 +134,7 @@ function normalizeSocialUrl(value: string) {
 
 export default function ProfilePage() {
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [profile, setProfile] = useState<ProfileData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [identities, setIdentities] = useState<LinkedIdentity[]>([])

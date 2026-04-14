@@ -17,7 +17,7 @@ type ResetResult = {
 }
 
 export default function AdminProgressResetPage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ResetResult | null>(null)

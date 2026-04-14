@@ -1330,7 +1330,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
 
 export default function GameplanPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const planId = 'a-plan'
   const [creatorArchetypeId, setCreatorArchetypeId] = useState<string | null>(null)
   const [remotePlan, setRemotePlan] = useState<RemoteGameplan | null>(null)

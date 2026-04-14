@@ -53,7 +53,7 @@ function getNotificationActionLabel(item: NotificationItem) {
 
 export default function NotificationsPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [items, setItems] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(true)
 

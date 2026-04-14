@@ -29,7 +29,7 @@ const reviewStatuses = [
 ]
 
 export default function AdminReviewsPage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const searchParams = useSearchParams()
   const [submissions, setSubmissions] = useState<ReviewSubmission[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)

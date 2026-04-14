@@ -190,7 +190,7 @@ function getThumbnailUrl(clip: Clip): string | null {
 }
 
 export default function AdminClipsPage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
 
   // State
   const [clips, setClips] = useState<Clip[]>([])

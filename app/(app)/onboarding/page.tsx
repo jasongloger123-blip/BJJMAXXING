@@ -13,7 +13,7 @@ type GymSuggestion = {
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [gymName, setGymName] = useState('')
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)

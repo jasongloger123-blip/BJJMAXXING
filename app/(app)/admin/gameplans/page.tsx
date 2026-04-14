@@ -246,7 +246,7 @@ function Section({
 }
 
 export default function GameplanAdminPage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [plans, setPlans] = useState<GameplanAdminPlan[]>([])
   const [profiles, setProfiles] = useState<GameplanProfileOption[]>([])
   const [currentAdminProfile, setCurrentAdminProfile] = useState<GameplanProfileOption | null>(null)

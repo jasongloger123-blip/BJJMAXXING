@@ -136,7 +136,7 @@ function dedupeClips(clips: ClipArchiveRecord[]) {
 export default function NodeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const node = getNodeById(id)
   const [activeTab, setActiveTab] = useState<TechniqueTab>('videos')
   const [progress, setProgress] = useState<ProgressState>({})

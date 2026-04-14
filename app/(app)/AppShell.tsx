@@ -66,7 +66,7 @@ async function loadLayoutProfileSafe(supabase: ReturnType<typeof createClient>, 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
 
   const [profileStateLoaded, setProfileStateLoaded] = useState(false)
   const [displayName, setDisplayName] = useState('BJJ Athlete')

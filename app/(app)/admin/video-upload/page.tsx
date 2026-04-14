@@ -85,7 +85,7 @@ function splitHashtags(value: string) {
 }
 
 export default function AdminVideoUploadPage() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [summary, setSummary] = useState('')
