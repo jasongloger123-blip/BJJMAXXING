@@ -424,6 +424,13 @@ export default function StartHome() {
       const {
         data: { session },
       } = await supabase.auth.getSession()
+      
+      console.log('StartHome: Session check:', { 
+        hasSession: !!session, 
+        hasAccessToken: !!session?.access_token,
+        userId: session?.user?.id 
+      })
+      
       const headers: Record<string, string> = {}
       if (session?.access_token) {
         headers.Authorization = `Bearer ${session.access_token}`
@@ -431,19 +438,25 @@ export default function StartHome() {
 
       const response = await fetch('/api/start-queue', { 
         cache: 'no-store', 
-        headers 
+        headers,
+        credentials: 'include' // Important: send cookies
       })
+      
+      console.log('StartHome: API response status:', response.status)
       
       // Set loading false immediately after first response
       setLoading(false)
       
       const payload = (await response.json()) as { queue?: QueueCard[] }
+      console.log('StartHome: Queue loaded:', { queueLength: payload.queue?.length ?? 0 })
+      
       if (!response.ok) {
         setServerQueue(null)
         return
       }
       setServerQueue(payload.queue ?? [])
-    } catch {
+    } catch (err) {
+      console.error('StartHome: Error loading queue:', err)
       setLoading(false)
       setServerQueue(null)
     }

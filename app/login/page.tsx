@@ -31,7 +31,7 @@ function LoginPageContent() {
     setError(null)
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password: password.trim(),
       })
@@ -44,6 +44,14 @@ function LoginPageContent() {
         setError(message)
         setLoading(false)
         return
+      }
+
+      // Ensure session is persisted in cookies
+      if (signInData.session) {
+        await supabase.auth.setSession({
+          access_token: signInData.session.access_token,
+          refresh_token: signInData.session.refresh_token,
+        })
       }
 
       // Sync the browser client with the server-set auth cookie before redirecting.

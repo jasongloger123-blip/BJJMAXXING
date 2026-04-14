@@ -16,6 +16,7 @@ type QueueCard = {
 export async function GET(request: NextRequest) {
   const admin = createAdminClient()
   if (!admin) {
+    console.log('Start-queue: No admin client')
     return NextResponse.json({ queue: [] })
   }
 
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
     // If no user from cookies, try Authorization header
     if (!user) {
       const authHeader = request.headers.get('authorization')
+      console.log('Start-queue: Auth header present:', !!authHeader)
       if (authHeader?.startsWith('Bearer ')) {
         const token = authHeader.slice(7)
         const { data: { user: tokenUser } } = await admin.auth.getUser(token)
@@ -47,6 +49,8 @@ export async function GET(request: NextRequest) {
       .select('node_id, completed')
       .eq('user_id', user.id)
       .limit(100)
+      
+    console.log('Start-queue: Progress entries:', progress?.length ?? 0)
 
     const completedIds = (progress ?? [])
       .filter((entry) => entry.completed)
@@ -58,6 +62,8 @@ export async function GET(request: NextRequest) {
       .select('primary_archetype, active_gameplan_id')
       .eq('id', user.id)
       .maybeSingle()
+      
+    console.log('Start-queue: Profile:', { hasProfile: !!profile, archetype: profile?.primary_archetype })
 
     // Get simple fallback gameplan or user's active plan
     const planId = profile?.active_gameplan_id
@@ -73,23 +79,31 @@ export async function GET(request: NextRequest) {
     }
 
     const { data: plan } = await planQuery.maybeSingle()
+    
+    console.log('Start-queue: Plan:', { hasPlan: !!plan, title: plan?.title })
 
     if (!plan) {
+      console.log('Start-queue: No plan found')
       return NextResponse.json({ queue: [] })
     }
 
     // Get first few nodes from plan
     const nodeIds = (plan.main_path_node_ids ?? []).slice(0, 10)
     
+    console.log('Start-queue: Node IDs:', nodeIds.length)
+    
     if (nodeIds.length === 0) {
+      console.log('Start-queue: No nodes in plan')
       return NextResponse.json({ queue: [] })
     }
 
     // Get nodes with their videos
-    const { data: nodes } = await admin
+    const { data: nodes, error: nodesError } = await admin
       .from('nodes')
       .select('id, title, videos')
       .in('id', nodeIds)
+      
+    console.log('Start-queue: Nodes loaded:', { count: nodes?.length ?? 0, error: nodesError?.message })
 
     // Build simple queue
     const queue: QueueCard[] = []
@@ -109,10 +123,12 @@ export async function GET(request: NextRequest) {
         })
       }
     }
+    
+    console.log('Start-queue: Built queue with', queue.length, 'items')
 
     return NextResponse.json({ queue })
   } catch (error) {
-    console.error('Start queue error:', error)
+    console.error('Start-queue error:', error)
     return NextResponse.json({ queue: [] })
   }
 }
