@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bell, BookOpen, ChevronLeft, ChevronRight, DatabaseZap, Home, MapPin, Sparkles, User2, Waypoints } from 'lucide-react'
+import { Bell, BookOpen, ChevronLeft, ChevronRight, DatabaseZap, Grid3X3, Home, MapPin, Sparkles, User2, Waypoints } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { getFlagSvgUrl } from '@/lib/countries'
 import { hasAdminAccess } from '@/lib/admin-access'
@@ -361,34 +361,34 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </aside>
 
           <div className={contentOffsetClass}>
-            {/* Mobile Bottom Navigation - nur sichtbar auf kleinen Screens */}
-            <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-bjj-border bg-bjj-bg/95 backdrop-blur lg:hidden">
-              <div className="mx-auto flex max-w-md items-center justify-around px-2 py-2">
-                {mobileNavItems.map((item) => {
-                  const Icon = item.icon
-                  const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`flex flex-col items-center gap-1 px-3 py-2 transition-colors ${
-                        isActive ? 'text-bjj-gold' : 'text-bjj-muted'
-                      }`}
-                    >
-                      <Icon className="h-6 w-6" />
-                      <span className="text-[10px] font-semibold">{item.label}</span>
-                    </Link>
-                  )
-                })}
-              </div>
-            </nav>
-
-            <main className={`${showGameplanSidebar && isGameplanImmersive ? 'w-full overflow-hidden px-0 py-0 lg:h-screen' : 'w-full px-4 py-6 md:px-6 md:py-8 lg:py-6'} pb-20 lg:pb-6`}>
+            <main className={`${showGameplanSidebar && isGameplanImmersive ? 'w-full overflow-hidden px-0 py-0 lg:h-screen' : 'w-full px-4 py-6 md:px-6 md:py-8 lg:py-6'} pb-32 lg:pb-6`}>
               {children}
             </main>
           </div>
         </>
       )}
+
+      {/* Mobile Bottom Navigation - IMMER SICHTBAR auf kleinen Screens */}
+      <nav className="fixed bottom-0 left-0 right-0 z-[99999] border-t border-bjj-border bg-[#0d1117] backdrop-blur-xl lg:hidden">
+        <div className="mx-auto flex max-w-md items-center justify-around px-2 py-2">
+          {mobileNavItems.map((item) => {
+              const Icon = item.icon
+              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex flex-col items-center gap-1 px-3 py-2 transition-colors ${
+                    isActive ? 'text-bjj-gold' : 'text-bjj-muted'
+                  }`}
+                >
+                  <Icon className="h-6 w-6" />
+                  <span className="text-[10px] font-semibold">{item.label}</span>
+                </Link>
+              )
+            })}
+        </div>
+      </nav>
     </div>
   )
 }

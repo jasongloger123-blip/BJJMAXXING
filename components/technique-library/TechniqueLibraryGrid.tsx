@@ -47,12 +47,17 @@ const STAGE_CARD_STYLES: Record<
 export function TechniqueLibraryGrid({ techniques }: TechniqueLibraryGridProps) {
   if (techniques.length === 0) {
     return (
-      <section className="mt-8 rounded-[2rem] border border-white/[0.05] bg-[#13141b] px-6 py-14 text-center">
-        <p className="text-[10px] font-bold uppercase tracking-[0.34em] text-white/38">No Match</p>
-        <h2 className="mt-4 text-3xl font-black text-white">Keine Technik trifft diese Filterkombination.</h2>
-        <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-white/55">
-          Entferne einen Coach oder lockere die Kategorie, dann fuellt sich das Grid direkt wieder.
-        </p>
+      <section className="mt-8 rounded-[2rem] border border-white/[0.05] bg-[#13141b] px-6 py-14 text-center lg:px-6 lg:py-14">
+        <div className="hidden lg:block">
+          <p className="text-[10px] font-bold uppercase tracking-[0.34em] text-white/38">No Match</p>
+          <h2 className="mt-4 text-3xl font-black text-white">Keine Technik trifft diese Filterkombination.</h2>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-white/55">
+            Entferne einen Coach oder lockere die Kategorie, dann fuellt sich das Grid direkt wieder.
+          </p>
+        </div>
+        <div className="lg:hidden">
+          <h2 className="text-xl font-bold text-white">Keine Technik trifft diese Filterkombination</h2>
+        </div>
       </section>
     )
   }

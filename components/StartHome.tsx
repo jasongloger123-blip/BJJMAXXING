@@ -960,7 +960,7 @@ export default function StartHome() {
     ? visibleCard?.clipId ?? (visibleCardResolvedClip.usesAssignedClip ? visibleCardResolvedClip.id : null)
     : null
   const activeVideoHeading = visibleCard
-    ? `${visibleCard.title.replace(/[.:]\s*$/, '')}: ${activeClipTitle}`.trim()
+    ? `${visibleCard.title}: ${activeClipTitle}`.trim()
     : ''
   const isClipLoading = !visibleCardResolvedClip?.url
   const currentTechniqueVideos = useMemo(() => {
@@ -1942,6 +1942,18 @@ export default function StartHome() {
     )
   }
 
+  // Onboarding check - must be before any conditional returns
+  const needsOnboarding = useMemo(() => {
+    if (loading) return false // Don't show during loading
+    if (!startState) return false // Don't show if no user
+    
+    // Check if user has completed all onboarding steps
+    const hasArchetype = Boolean(startState.primaryArchetype)
+    const hasGymSet = Boolean(startState.gymPlaceId ?? startState.gymName ?? startState.gymUnlistedName)
+    
+    return !hasArchetype || !hasGymSet
+  }, [startState, loading])
+
   if (loading) {
     return <div className="h-40 rounded-3xl border border-bjj-border bg-bjj-card shimmer" />
   }
@@ -2007,7 +2019,7 @@ export default function StartHome() {
     )
   }
 
-  if (!hasGym) {
+  if (!hasGym && needsOnboarding) {
     return (
       <div className="flex min-h-[calc(100vh-110px)] items-center justify-center">
         <section className="w-full max-w-5xl rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-10 shadow-card md:px-10 md:py-14">
@@ -2139,12 +2151,7 @@ export default function StartHome() {
       ) : null}
       {/* Clean YouTube-Style Layout */}
       <div className="space-y-6">
-        {/* Title above Video */}
-        <header>
-          <h1 className="text-xl font-bold text-white lg:text-2xl">{activeVideoHeading}</h1>
-        </header>
-
-        <div className="relative">
+        <div className="relative w-full">
           {/* Video + Info */}
           <div className={`space-y-4 start-home-slide transition-all duration-500 ${transitionPhase === 'out' ? 'start-home-slide-out' : ''} ${transitionPhase === 'prepare' ? 'start-home-slide-in' : ''}`}>
             {/* Video Player */}
@@ -2170,7 +2177,29 @@ export default function StartHome() {
               )}
             </div>
 
-            {/* Video Controls - direkt unter dem Video */}
+            {/* Action Buttons - direkt unter dem Video */}
+            <div className="flex h-14 w-full overflow-hidden rounded-lg">
+              <button
+                type="button"
+                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
+                onClick={() => handleAnimatedQueueAction('not_yet')}
+                className={`flex flex-1 items-center justify-center gap-2 bg-red-500/20 text-base font-semibold text-white transition hover:bg-red-500/30 disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
+              >
+                <X className="h-5 w-5 text-red-400" />
+                <span>Kann ich nicht</span>
+              </button>
+              <button
+                type="button"
+                disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
+                onClick={() => handleAnimatedQueueAction('known')}
+                className={`flex flex-1 items-center justify-center gap-2 bg-green-500/20 text-base font-semibold text-white transition hover:bg-green-500/30 disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
+              >
+                <Check className="h-5 w-5 text-green-400" />
+                <span>Kann ich</span>
+              </button>
+            </div>
+
+            {/* Video Controls - unter den Buttons */}
             {visibleCardResolvedClip?.url && (
               <div className="flex flex-wrap items-center justify-between gap-3 border-y border-white/10 bg-white/[0.02] py-3 px-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -2356,15 +2385,16 @@ export default function StartHome() {
                       </div>
                     )
                   })}
-                  {debugQueueCards.length === 0 ? (
-                    <p className="rounded-lg border border-white/8 bg-black/12 px-3 py-2 text-xs text-white/46">
-                      Keine neuen Videos mit Unlock-Fortschritt in der aktuellen Queue.
-                    </p>
-                  ) : null}
+                    {debugQueueCards.length === 0 ? (
+                      <p className="rounded-lg border border-white/8 bg-black/12 px-3 py-2 text-xs text-white/46">
+                        Keine neuen Videos mit Unlock-Fortschritt in der aktuellen Queue.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
+            {/* Progress Bar - unter dem Video */}
             <div className="rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/58">
                 <span>Nächste Technik</span>
@@ -2386,57 +2416,38 @@ export default function StartHome() {
               </div>
             </div>
 
-          </div>
+            {/* Titel - außerhalb des Fortschritts-Blocks */}
+            <h2 className="mt-4 text-left text-xl font-bold text-white">
+              {activeVideoHeading}
+            </h2>
+            {visibleCard?.clipDescription && visibleCard.clipDescription !== 'Advanced Brazilian Jiu-Jitsu analytics and match analysis database with AI-powered search' ? (
+              <p className="mt-2 text-left text-sm text-white/60">
+                {visibleCard.clipDescription}
+              </p>
+            ) : null}
 
-          {/* Action Buttons unter dem Video - wie im Bild */}
-          <div className="mt-4 flex h-14 w-full overflow-hidden rounded-lg">
-            <button
-              type="button"
-              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
-              onClick={() => handleAnimatedQueueAction('not_yet')}
-              className={`flex flex-1 items-center justify-center gap-2 bg-red-500/20 text-base font-semibold text-white transition hover:bg-red-500/30 disabled:opacity-50 ${isShaking ? 'start-home-pressed' : ''}`}
-            >
-              <X className="h-5 w-5 text-red-400" />
-              <span>Kann ich nicht</span>
-            </button>
-            <button
-              type="button"
-              disabled={savingId === visibleCard.id || transitionPhase !== 'idle' || isFlying || isShaking || isClipLoading}
-              onClick={() => handleAnimatedQueueAction('known')}
-              className={`flex flex-1 items-center justify-center gap-2 bg-green-500/20 text-base font-semibold text-white transition hover:bg-green-500/30 disabled:opacity-50 ${isFlying ? 'start-home-pressed' : ''}`}
-            >
-              <Check className="h-5 w-5 text-green-400" />
-              <span>Kann ich</span>
-            </button>
-          </div>
-
-          {isFlying && visiblePreviewImage ? (
-            <div className="start-home-flying-video fixed overflow-hidden rounded-[1.5rem]" style={flyingVideoStyle ?? undefined}>
-              <img src={visiblePreviewImage} alt={visibleCard.title} className="h-full w-full object-cover opacity-90" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
             </div>
-          ) : null}
-        </div>
-      </div>
-
-
-
-      {/* Legacy layout kept for rollback
-      <div className="start-layout-replace">
-        responseActions={
-          <>
-            <button type="button" disabled={savingId === primaryCard.id} onClick={() => void submitQueueResult(primaryCard, 'not_yet')} className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-bjj-border bg-bjj-surface text-5xl font-black text-[#ff6b6b] transition-colors hover:border-bjj-gold/30 disabled:cursor-not-allowed disabled:text-bjj-muted">✕</button>
-            <button type="button" disabled={savingId === primaryCard.id} onClick={() => void submitQueueResult(primaryCard, 'known')} className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-bjj-border bg-bjj-surface text-5xl font-black text-[#41d36c] transition-colors hover:border-bjj-gold/30 disabled:cursor-not-allowed disabled:text-bjj-muted">✓</button>
-          </>
-        }
-        metaActions={
-          <div className="flex flex-wrap items-center gap-2">
-            <a href={visibleCard.clipUrl} target="_blank" rel="noreferrer" className="inline-flex rounded-lg bg-[linear-gradient(90deg,#8f4ad0,#3c87f0)] px-4 py-2 text-xs font-black text-white">Open in YouTube</a>
-            <Link href={`/node/${visibleCard.nodeId}`} className="inline-flex rounded-lg border border-[#606983] bg-[#2c3447] px-4 py-2 text-xs font-black text-white">Node oeffnen</Link>
           </div>
-        }
-      />
-      */}
+        </div>
+
+
+ 
+       {/* Legacy layout kept for rollback
+       <div className="start-layout-replace">
+         responseActions={
+           <>
+             <button type="button" disabled={savingId === primaryCard.id} onClick={() => void submitQueueResult(primaryCard, 'not_yet')} className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-bjj-border bg-bjj-surface text-5xl font-black text-[#ff6b6b] transition-colors hover:border-bjj-gold/30 disabled:cursor-not-allowed disabled:text-bjj-muted">✕</button>
+             <button type="button" disabled={savingId === primaryCard.id} onClick={() => void submitQueueResult(primaryCard, 'known')} className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-bjj-border bg-bjj-surface text-5xl font-black text-[#41d36c] transition-colors hover:border-bjj-gold/30 disabled:cursor-not-allowed disabled:text-bjj-muted">✓</button>
+           </>
+         }
+         metaActions={
+           <div className="flex flex-wrap items-center gap-2">
+             <a href={visibleCard.clipUrl} target="_blank" rel="noreferrer" className="inline-flex rounded-lg bg-[linear-gradient(90deg,#8f4ad0,#3c87f0)] px-4 py-2 text-xs font-black text-white">Open in YouTube</a>
+             <Link href={`/node/${visibleCard.nodeId}`} className="inline-flex rounded-lg border border-[#606983] bg-[#2c3447] px-4 py-2 text-xs font-black text-white">Node oeffnen</Link>
+           </div>
+         }
+       />
+       */}
       {/* Simple YouTube-Style Comments */}
       <section className="mt-8 border-t border-white/10 pt-6">
         <h3 className="text-lg font-bold text-white">{comments.length} Kommentare</h3>

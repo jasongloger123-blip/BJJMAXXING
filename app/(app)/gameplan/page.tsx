@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowRight, CheckCircle2, ChevronDown, CirclePlay, Lock, Target } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ChevronDown, CirclePlay, Lock, Maximize2, Target } from 'lucide-react'
 import { GameplanClipDeck } from '@/components/gameplan/GameplanClipDeck'
 import { getCuratedClipsForNode, type CuratedClip } from '@/lib/curated-clips'
 import { clipArchiveToCuratedClip, type ClipArchiveRecord } from '@/lib/clip-archive'
@@ -2569,9 +2569,71 @@ export default function GameplanPage() {
           ) : (
             /* Selected Plan View */
             <div className="h-screen lg:h-auto">
+              {/* Mobile Fixed Header with Title and Progress */}
+              <div className="fixed left-0 right-0 top-0 z-30 border-b border-white/10 bg-[#0b0d14]/95 px-4 py-3 backdrop-blur-md lg:hidden">
+                {progressSummary ? (
+                  <div className="text-white/88">
+                    <p className="text-center text-sm font-black uppercase tracking-[0.08em] text-white">
+                      {planHeadline}
+                    </p>
+                    <div className="relative mt-2 flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className="h-full rounded-full bg-[linear-gradient(90deg,#d99f5c,#f0c27b)]"
+                            style={{
+                              width: `${Math.max(
+                                unlockedTechniqueProgress.completed > 0 ? 8 : 0,
+                                Math.round(
+                                  (unlockedTechniqueProgress.completed /
+                                    Math.max(unlockedTechniqueProgress.total, 1)) *
+                                    100
+                                )
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-[10px] font-black uppercase tracking-[0.16em] text-white/66">
+                        {unlockedTechniqueProgress.completed}/{Math.max(unlockedTechniqueProgress.total, 1)}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Mobile Fixed Bottom Navigation - Nur Icons */}
+              <div className="fixed bottom-20 left-4 right-4 z-[110] flex items-end justify-between lg:hidden">
+                {/* Back to Overview - Bottom Left - Nur Icon */}
+                <button
+                  type="button"
+                  onClick={handleBackToOverview}
+                  className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-[rgba(10,14,22,0.9)] text-white/90 shadow-[0_10px_24px_rgba(0,0,0,0.3)] backdrop-blur-md transition hover:bg-[rgba(18,23,33,0.95)]"
+                  title="Zurück zur Übersicht"
+                >
+                  <ChevronDown className="h-5 w-5 rotate-90" />
+                </button>
+
+                {/* Show All Nodes - Bottom Right - Nur Icon */}
+                {!detailOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllNodes((current) => !current)}
+                    className={`inline-flex h-12 w-12 items-center justify-center rounded-full border text-white/90 shadow-[0_10px_24px_rgba(0,0,0,0.3)] backdrop-blur-md transition ${
+                      showAllNodes
+                        ? 'border-bjj-gold/40 bg-bjj-gold/20 text-bjj-gold'
+                        : 'border-white/10 bg-[rgba(10,14,22,0.9)]'
+                    }`}
+                    title={showAllNodes ? 'Alle Techniken aktiv' : 'Alle Techniken anzeigen'}
+                  >
+                    <Maximize2 className="h-5 w-5" />
+                  </button>
+                ) : null}
+              </div>
+
               <div
                 ref={viewportRef}
-                className="relative h-full min-h-screen overflow-auto border border-white/[0.06] bg-[radial-gradient(circle_at_top_left,rgba(217,137,88,0.08),transparent_22%),radial-gradient(circle_at_top_right,rgba(109,128,255,0.08),transparent_24%),radial-gradient(circle_at_bottom_right,rgba(150,108,255,0.06),transparent_24%),linear-gradient(180deg,rgba(12,16,24,0.94),rgba(11,15,23,0.92))] select-none lg:h-auto lg:min-h-screen lg:overflow-hidden"
+                className="relative h-full min-h-screen overflow-auto pt-[72px] select-none lg:h-auto lg:min-h-screen lg:overflow-hidden lg:pt-0"
                 onWheel={handleWheel}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
@@ -2580,7 +2642,7 @@ export default function GameplanPage() {
                 style={{ cursor: isPanning ? 'grabbing' : 'grab', overscrollBehavior: 'contain' }}
               >
                 <div
-                  className="absolute top-5 z-20 flex flex-col gap-2 transition-[left] duration-300"
+                  className="absolute top-5 z-20 hidden flex-col gap-2 transition-[left] duration-300 lg:flex"
                   style={{ left: 'calc(var(--app-sidebar-width, 96px) - var(--app-sidebar-collapsed-width, 96px) + 1.25rem)' }}
                 >
                   <div className="flex items-center gap-3">
@@ -2668,10 +2730,12 @@ export default function GameplanPage() {
                   </div>
                 </div>
                 {progressSummary ? (
-                  <div className={`absolute left-1/2 top-6 z-20 w-[min(28rem,calc(100%-9rem))] -translate-x-1/2 px-2 text-white/88 ${gameplanUnlockAnimation ? 'gameplan-progress-celebrate' : ''}`}>
-                    <p className="text-center text-[1.1rem] font-black uppercase tracking-[0.08em] text-white sm:text-[1.45rem]">
-                      {planHeadline}
-                    </p>
+                  <div className={`absolute left-1/2 top-6 z-20 hidden w-[min(28rem,calc(100%-9rem))] -translate-x-1/2 px-2 text-white/88 lg:block ${gameplanUnlockAnimation ? 'gameplan-progress-celebrate' : ''}`}>
+                    <div>
+                      <p className="text-center text-[1.1rem] font-black uppercase tracking-[0.08em] text-white sm:text-[1.45rem]">
+                        {planHeadline}
+                      </p>
+                    </div>
                     <div className="relative mt-3 flex items-center gap-4">
                       {gameplanUnlockAnimation ? (
                         <>
@@ -2706,7 +2770,7 @@ export default function GameplanPage() {
                   </div>
                 ) : null}
                 {!detailOpen ? (
-                  <div className="absolute right-5 top-5 z-20 flex items-center gap-3">
+                  <div className="absolute right-5 top-5 z-20 hidden items-center gap-3 lg:flex">
                     <button
                       type="button"
                       onMouseDown={(event) => event.stopPropagation()}
@@ -2879,8 +2943,8 @@ export default function GameplanPage() {
                 </div>
 
                 {detailOpen ? (
-                  <aside className="pointer-events-auto absolute right-5 top-5 z-30 w-[360px] max-w-[calc(100%-2.5rem)]">
-                    <div className="fluid-surface rounded-[1.25rem] bg-[linear-gradient(180deg,rgba(18,23,33,0.82),rgba(14,18,26,0.8))] p-3 shadow-[0_12px_26px_rgba(0,0,0,0.2)]">
+                  <aside className="pointer-events-auto fixed inset-0 z-30 flex items-start justify-center p-4 pt-[120px] lg:absolute lg:inset-auto lg:right-5 lg:top-5 lg:z-30 lg:w-[360px] lg:max-w-[calc(100%-2.5rem)] lg:items-start lg:justify-start lg:p-0">
+                    <div className="fluid-surface w-full max-w-lg rounded-[1.25rem] bg-[linear-gradient(180deg,rgba(18,23,33,0.98),rgba(14,18,26,0.96))] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.35)] backdrop-blur-md lg:w-auto lg:max-w-none lg:bg-[linear-gradient(180deg,rgba(18,23,33,0.82),rgba(14,18,26,0.8))] lg:p-3 lg:shadow-[0_12px_26px_rgba(0,0,0,0.2)]">
                       <div className="flex items-center justify-between">
                         <p className="text-[0.72rem] font-black uppercase tracking-[0.28em] text-bjj-gold">Videos</p>
                         <button

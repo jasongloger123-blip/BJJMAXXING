@@ -403,11 +403,11 @@ export default function ProfilePage() {
 
   return (
     <>
-      <div className="mx-auto w-full">
+      <div className="mx-auto w-full pb-28 lg:pb-0">
         <section className="space-y-6">
-          <div className="relative overflow-hidden rounded-[2.25rem] border border-black/20 bg-[linear-gradient(180deg,rgba(24,31,45,0.96)_0%,rgba(17,22,31,0.99)_100%)] p-6 shadow-card sm:p-8">
-            <div className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-bjj-gold/12 blur-3xl" />
-            <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-40 rounded-full bg-[#6e86b8]/10 blur-3xl" />
+          <div className="relative p-4 sm:p-6 lg:rounded-[1.65rem] lg:border lg:border-black/20 lg:bg-[linear-gradient(180deg,rgba(24,31,45,0.96)_0%,rgba(17,22,31,0.99)_100%)] lg:shadow-card">
+            <div className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-bjj-gold/12 blur-3xl lg:hidden" />
+            <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-40 rounded-full bg-[#6e86b8]/10 blur-3xl lg:hidden" />
 
             <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:gap-8">
                 <button
@@ -605,6 +605,20 @@ export default function ProfilePage() {
           )}
 
           <ProfileSavedClips />
+
+          {/* Mobile Logout Button - nur auf kleinen Screens sichtbar */}
+          <div className="mt-6 lg:hidden">
+            <button
+              type="button"
+              onClick={async () => {
+                await supabase.auth.signOut({ scope: 'global' })
+                window.location.replace('/?logged_out=1')
+              }}
+              className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-5 py-4 text-sm font-black text-bjj-muted transition hover:border-red-500/30 hover:text-red-400"
+            >
+              Ausloggen
+            </button>
+          </div>
         </section>
       </div>
 
