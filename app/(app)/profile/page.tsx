@@ -689,20 +689,6 @@ export default function ProfilePage() {
           </div>
         </div>
       ) : null}
-
-      {/* Mobile Logout Button - nur auf kleinen Screens sichtbar */}
-      <div className="mt-6 lg:hidden">
-        <button
-          type="button"
-          onClick={async () => {
-            await supabase.auth.signOut({ scope: 'global' })
-            window.location.replace('/?logged_out=1')
-          }}
-          className="w-full rounded-2xl border border-bjj-border bg-bjj-surface px-5 py-4 text-sm font-black text-bjj-muted transition hover:border-red-500/30 hover:text-red-400"
-        >
-          Ausloggen
-        </button>
-      </div>
     </>
   )
 }

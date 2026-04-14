@@ -2394,8 +2394,18 @@ export default function StartHome() {
                 </div>
               )}
 
+            {/* Titel - über dem Fortschritts-Block */}
+            <h2 className="text-left text-xl font-bold text-white">
+              {activeVideoHeading}
+            </h2>
+            {visibleCard?.clipDescription && visibleCard.clipDescription !== 'Advanced Brazilian Jiu-Jitsu analytics and match analysis database with AI-powered search' ? (
+              <p className="mt-2 text-left text-sm text-white/60">
+                {visibleCard.clipDescription}
+              </p>
+            ) : null}
+
             {/* Progress Bar - unter dem Video */}
-            <div className="rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
+            <div className="mt-4 rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/58">
                 <span>Nächste Technik</span>
                 <span className={progressCountFlash ? 'start-home-count-flash' : ''}>
@@ -2415,16 +2425,6 @@ export default function StartHome() {
                 </div>
               </div>
             </div>
-
-            {/* Titel - außerhalb des Fortschritts-Blocks */}
-            <h2 className="mt-4 text-left text-xl font-bold text-white">
-              {activeVideoHeading}
-            </h2>
-            {visibleCard?.clipDescription && visibleCard.clipDescription !== 'Advanced Brazilian Jiu-Jitsu analytics and match analysis database with AI-powered search' ? (
-              <p className="mt-2 text-left text-sm text-white/60">
-                {visibleCard.clipDescription}
-              </p>
-            ) : null}
 
             </div>
           </div>

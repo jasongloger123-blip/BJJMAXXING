@@ -83,21 +83,38 @@ export default async function ClipDetailPage({ params }: { params: { id: string 
     new Map(
       enrichedAssignments
         .flatMap((assignment) => {
-          if (assignment.assignment_kind === 'node') {
-            return assignment.nodeHref && assignment.nodeTitle
-              ? [{ href: assignment.nodeHref, title: assignment.nodeTitle }]
-              : []
+          const techniques: { href: string | null; title: string | null; nodeId: string | null }[] = []
+          
+          if (assignment.assignment_kind === 'node' && assignment.node_id) {
+            // For node assignments, always show if we have a node_id
+            techniques.push({
+              href: assignment.nodeHref ?? `/node/${assignment.node_id}`,
+              title: assignment.nodeTitle ?? 'Technik',
+              nodeId: assignment.node_id
+            })
           }
-
-          return [
-            assignment.fromNodeHref && assignment.fromNodeTitle
-              ? { href: assignment.fromNodeHref, title: assignment.fromNodeTitle }
-              : null,
-            assignment.toNodeHref && assignment.toNodeTitle
-              ? { href: assignment.toNodeHref, title: assignment.toNodeTitle }
-              : null,
-          ].filter((entry): entry is { href: string; title: string } => Boolean(entry))
+          
+          if (assignment.from_node_id) {
+            techniques.push({
+              href: assignment.fromNodeHref ?? `/node/${assignment.from_node_id}`,
+              title: assignment.fromNodeTitle ?? 'Technik',
+              nodeId: assignment.from_node_id
+            })
+          }
+          
+          if (assignment.to_node_id) {
+            techniques.push({
+              href: assignment.toNodeHref ?? `/node/${assignment.to_node_id}`,
+              title: assignment.toNodeTitle ?? 'Technik',
+              nodeId: assignment.to_node_id
+            })
+          }
+          
+          return techniques
         })
+        .filter((entry): entry is { href: string; title: string; nodeId: string } => 
+          Boolean(entry.href && entry.nodeId)
+        )
         .map((entry) => [entry.href, entry])
     ).values()
   )

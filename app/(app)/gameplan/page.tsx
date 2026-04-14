@@ -2944,17 +2944,15 @@ export default function GameplanPage() {
 
                 {detailOpen ? (
                   <aside className="pointer-events-auto fixed inset-0 z-30 flex items-start justify-center p-4 pt-[120px] lg:absolute lg:inset-auto lg:right-5 lg:top-5 lg:z-30 lg:w-[360px] lg:max-w-[calc(100%-2.5rem)] lg:items-start lg:justify-start lg:p-0">
-                    <div className="fluid-surface w-full max-w-lg rounded-[1.25rem] bg-[linear-gradient(180deg,rgba(18,23,33,0.98),rgba(14,18,26,0.96))] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.35)] backdrop-blur-md lg:w-auto lg:max-w-none lg:bg-[linear-gradient(180deg,rgba(18,23,33,0.82),rgba(14,18,26,0.8))] lg:p-3 lg:shadow-[0_12px_26px_rgba(0,0,0,0.2)]">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[0.72rem] font-black uppercase tracking-[0.28em] text-bjj-gold">Videos</p>
-                        <button
-                          type="button"
-                          onClick={() => setDetailOpen(false)}
-                          className="text-xs font-black text-white/60 hover:text-white"
-                        >
-                          Schliessen
-                        </button>
-                      </div>
+                    <div className="fluid-surface relative w-full max-w-lg rounded-[1.25rem] bg-[linear-gradient(180deg,rgba(18,23,33,0.98),rgba(14,18,26,0.96))] p-4 shadow-[0_12px_26px_rgba(0,0,0,0.35)] backdrop-blur-md lg:w-auto lg:max-w-none lg:bg-[linear-gradient(180deg,rgba(18,23,33,0.82),rgba(14,18,26,0.8))] lg:p-3 lg:shadow-[0_12px_26px_rgba(0,0,0,0.2)]">
+                      <button
+                        type="button"
+                        onClick={() => setDetailOpen(false)}
+                        className="absolute right-3 top-3 rounded-md px-2 py-1 text-xs font-black text-white/60 hover:bg-white/10 hover:text-white"
+                      >
+                        Schliessen
+                      </button>
+                      <p className="text-[0.72rem] font-black uppercase tracking-[0.28em] text-bjj-gold">Videos</p>
                       <h2 className="mt-2 text-xl font-black tracking-[-0.03em] text-white">{detailConnection?.title ?? detailNode.title}</h2>
                       <p className="mt-1 text-xs text-white/65">{detailConnection?.label ?? detailNode.label}</p>
 
