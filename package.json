@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@playwright/cli": "^0.1.6",
+    "@playwright/test": "^1.59.1",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

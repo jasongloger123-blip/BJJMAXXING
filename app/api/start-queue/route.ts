@@ -20,13 +20,26 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Get user from session
+    // Get user from session - try cookie-based auth first
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    let { data: { user } } = await supabase.auth.getUser()
+    
+    // If no user from cookies, try Authorization header
+    if (!user) {
+      const authHeader = request.headers.get('authorization')
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.slice(7)
+        const { data: { user: tokenUser } } = await admin.auth.getUser(token)
+        user = tokenUser
+      }
+    }
     
     if (!user) {
+      console.log('Start-queue: No authenticated user found')
       return NextResponse.json({ queue: [] })
     }
+    
+    console.log('Start-queue: Authenticated user:', user.id)
 
     // Get minimal data needed for first video
     const { data: progress } = await admin

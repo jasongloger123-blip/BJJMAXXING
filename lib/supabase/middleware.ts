@@ -33,11 +33,22 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  void user
+  // IMPORTANT: Refresh session if expired - required for Server Components
+  // This is the key fix for Safari/Chrome Incognito where cookies behave differently
+  const { data: { user }, error } = await supabase.auth.getUser()
+  
+  if (error) {
+    console.log('Middleware auth error:', error.message)
+  }
+  
+  // Try to refresh the session if there's a session but getUser failed
+  // This helps with cross-browser cookie issues
+  if (!user && request.cookies.get('sb-auth-token')) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) {
+      console.log('Session found, user will be available on next request')
+    }
+  }
 
   return supabaseResponse
 }
