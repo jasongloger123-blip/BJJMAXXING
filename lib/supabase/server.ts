@@ -16,6 +16,16 @@ export function createClient() {
     {
       auth: {
         detectSessionInUrl: true,
+        flowType: 'pkce',
+        autoRefreshToken: false, // Don't auto-refresh on server
+      },
+      cookieOptions: {
+        name: 'sb-auth-token',
+        domain: undefined, // Let browser decide
+        path: '/',
+        sameSite: 'lax',
+        secure: false, // Must be false for localhost HTTP
+        maxAge: 60 * 60 * 24 * 7, // 7 days
       },
       cookies: {
         getAll() {
@@ -26,8 +36,9 @@ export function createClient() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             )
-          } catch {
+          } catch (e) {
             // Server Component - cookies can't be set
+            // This is expected in Server Components
           }
         },
       },
