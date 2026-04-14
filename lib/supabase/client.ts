@@ -18,7 +18,8 @@ export function createClient() {
       },
       cookieOptions: {
         sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
+        // Only secure in production - localhost needs http
+        secure: false,
         maxAge: 60 * 60 * 24 * 7, // 7 days
       },
     }

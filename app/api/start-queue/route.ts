@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 export const dynamic = 'force-dynamic'
@@ -13,6 +12,32 @@ type QueueCard = {
   completed: boolean
 }
 
+// Extract access token from Supabase auth cookie
+function extractTokenFromCookie(cookieHeader: string): string | null {
+  // Look for sb-<project-ref>-auth-token cookie
+  const match = cookieHeader.match(/sb-[\w-]+-auth-token=([^;]+)/)
+  if (!match) return null
+  
+  try {
+    // The cookie value is a JSON string with base64 encoded access_token
+    const cookieValue = decodeURIComponent(match[1])
+    const parsed = JSON.parse(cookieValue)
+    
+    // The token might be directly in the cookie or in a nested structure
+    if (typeof parsed === 'string') {
+      return parsed
+    }
+    if (parsed && typeof parsed === 'object') {
+      // Try different possible structures
+      return parsed.access_token || parsed.token || null
+    }
+    return null
+  } catch (e) {
+    console.log('Start-queue: Failed to parse auth cookie:', e)
+    return null
+  }
+}
+
 export async function GET(request: NextRequest) {
   const admin = createAdminClient()
   if (!admin) {
@@ -21,18 +46,42 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Get user from session - try cookie-based auth first
-    const supabase = createClient()
-    let { data: { user } } = await supabase.auth.getUser()
+    // Get cookie header
+    const cookieHeader = request.headers.get('cookie')
+    console.log('Start-queue: Cookie header present:', !!cookieHeader)
     
-    // If no user from cookies, try Authorization header
-    if (!user) {
-      const authHeader = request.headers.get('authorization')
-      console.log('Start-queue: Auth header present:', !!authHeader)
-      if (authHeader?.startsWith('Bearer ')) {
-        const token = authHeader.slice(7)
-        const { data: { user: tokenUser } } = await admin.auth.getUser(token)
+    let user = null
+    
+    // Try to get user from Authorization header first
+    const authHeader = request.headers.get('authorization')
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7)
+      console.log('Start-queue: Trying Authorization header')
+      const { data: { user: tokenUser }, error } = await admin.auth.getUser(token)
+      if (tokenUser) {
         user = tokenUser
+        console.log('Start-queue: User found from Authorization header:', user.id)
+      } else if (error) {
+        console.log('Start-queue: Auth header error:', error.message)
+      }
+    }
+    
+    // If no user from header, try cookie
+    if (!user && cookieHeader) {
+      console.log('Start-queue: Trying cookie auth, cookies:', cookieHeader.substring(0, 300))
+      
+      const token = extractTokenFromCookie(cookieHeader)
+      if (token) {
+        console.log('Start-queue: Extracted token from cookie, length:', token.length)
+        const { data: { user: cookieUser }, error } = await admin.auth.getUser(token)
+        if (cookieUser) {
+          user = cookieUser
+          console.log('Start-queue: User found from cookie:', user.id)
+        } else if (error) {
+          console.log('Start-queue: Cookie auth error:', error.message)
+        }
+      } else {
+        console.log('Start-queue: No token found in cookies')
       }
     }
     

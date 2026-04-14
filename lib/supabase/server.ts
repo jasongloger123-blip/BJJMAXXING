@@ -15,7 +15,6 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       auth: {
-        // Ensure cookies are detected in all browser contexts
         detectSessionInUrl: true,
       },
       cookies: {
