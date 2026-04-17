@@ -87,7 +87,7 @@ function RegisterPageContent() {
     <PublicAuthShell
       title={
         <>
-          Warrior <span className="text-bjj-orange">werden</span>
+          BJJ Athlet <span className="text-bjj-orange">werden</span>
         </>
       }
       subtitle="Erstelle dein Konto und starte dein Training."

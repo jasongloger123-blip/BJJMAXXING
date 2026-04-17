@@ -151,7 +151,7 @@ export default async function ClipDetailPage({ params }: { params: { id: string 
                 rel="noreferrer"
                 className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08),transparent_50%),linear-gradient(180deg,#272f3f,#131924)] px-6 text-center"
               >
-                <span className="text-sm font-semibold text-white/84">Video extern oeffnen</span>
+                <span className="text-sm font-semibold text-white/84">Video extern öffnen</span>
               </a>
             )}
           </div>
@@ -164,8 +164,8 @@ export default async function ClipDetailPage({ params }: { params: { id: string 
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-bjj-gold/20 bg-bjj-gold/10 text-bjj-gold transition hover:bg-bjj-gold/16"
-                title="Original Video oeffnen"
-                aria-label="Original Video oeffnen"
+                title="Original Video öffnen"
+                aria-label="Original Video öffnen"
               >
                 <Link2 className="h-4 w-4" />
               </a>
@@ -173,7 +173,7 @@ export default async function ClipDetailPage({ params }: { params: { id: string 
             </div>
             <h1 className="mt-3 text-4xl font-black tracking-[-0.04em] text-white">{(clip as ClipArchiveRecord).title}</h1>
             <p className="mt-4 text-sm leading-8 text-white/76">
-              {(clip as ClipArchiveRecord).summary ?? 'Keine Zusammenfassung fuer diesen Clip erkannt.'}
+              {(clip as ClipArchiveRecord).summary ?? 'Keine Zusammenfassung für diesen Clip erkannt.'}
             </p>
             <div className="mt-5">
               <p className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-bjj-gold">

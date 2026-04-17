@@ -49,7 +49,7 @@ function getPreviewImage(url: string, source: CuratedClipCardProps['source']) {
 function getSourceButtonLabel(source: CuratedClipCardProps['source']) {
   if (source === 'instagram') return 'Open in Instagram'
   if (source === 'youtube') return 'Open in YouTube'
-  return 'Clip oeffnen'
+  return 'Clip öffnen'
 }
 
 function shouldShowPrinciple(principle?: string) {

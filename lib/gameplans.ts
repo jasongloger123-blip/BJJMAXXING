@@ -485,7 +485,26 @@ function withResolvedStates(
     const completedRuleCount = completionRuleIds.filter((ruleId) => Boolean(snapshot?.[ruleId as keyof typeof snapshot])).length
     const validationTotal = node.requiresValidation ? 1 : 0
     const validationCompleted = node.requiresValidation && snapshot?.validated ? 1 : 0
-    const progressTotalRules = clipTotal > 0 ? clipTotal : completionRuleIds.length + validationTotal
+    
+    // WICHTIG: Standing Node muss IMMER 29 Clips haben!
+    const isStandingNode = 
+      node.title?.toLowerCase().includes('standing') ||
+      node.sourceNodeId === 'node-1-guard-identity' ||
+      sourceNodeId === 'node-1-guard-identity' ||
+      node.id?.includes('c3934120') ||
+      node.id?.includes('08d5e574')
+    
+    let progressTotalRules: number
+    if (isStandingNode) {
+      progressTotalRules = 29 // IMMER 29 für Standing!
+    } else {
+      // Respektiere hardcoded progressTotalRules aus dem Node
+      progressTotalRules = node.progressTotalRules ?? 0
+      if (progressTotalRules === 0) {
+        progressTotalRules = clipTotal > 0 ? clipTotal : completionRuleIds.length + validationTotal
+      }
+    }
+    
     const progressCompletedRules = clipTotal > 0 ? Math.min(clipTotal, sourceMeta?.knownClipCount ?? 0) : completedRuleCount + validationCompleted
     const progressPercent =
       progressTotalRules > 0
@@ -604,9 +623,9 @@ export function toAdminPlan(record: any): GameplanAdminPlan {
   const archetypeAssignmentCount = activeAssignments.filter((assignment) => assignment.targetType === 'archetype' && assignment.archetypeId).length
   const assignmentPriorityNote =
     directProfileAssignmentCount > 0
-      ? 'Direkte Profil-Zuweisung hat Vorrang. Wenn ein Profil hier zugewiesen ist, wird dieser Plan fuer dieses Profil angezeigt, auch wenn der Archetyp nicht passt.'
+      ? 'Direkte Profil-Zuweisung hat Vorrang. Wenn ein Profil hier zugewiesen ist, wird dieser Plan für dieses Profil angezeigt, auch wenn der Archetyp nicht passt.'
       : archetypeAssignmentCount > 0
-        ? 'Ohne direkte Profil-Zuweisung wird dieser Plan ueber passende Archetyp-Zuweisungen sichtbar.'
+        ? 'Ohne direkte Profil-Zuweisung wird dieser Plan über passende Archetyp-Zuweisungen sichtbar.'
         : null
 
   return {
@@ -702,10 +721,10 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'De La Riva',
       stage: 'position',
       label: 'Entry Position',
-      description: 'Hier baust du deine De-La-Riva-Position auf, bevor du den Winkel fuer den Backtake oeffnest.',
-      outcome: 'Gibt dir den klaren Einstieg in deinen Rueckenangriff.',
-      focus: ['Hook und Distanz sauber setzen', 'Winkel fuer die Rotation vorbereiten', 'Balance des Gegners frueh lesen'],
-      mistakes: ['Zu flach vor dem Gegner bleiben', 'Hook ohne Kontrolle setzen', 'Winkel zu spaet aufbauen'],
+      description: 'Hier baust du deine De-La-Riva-Position auf, bevor du den Winkel für den Backtake öffnest.',
+      outcome: 'Gibt dir den klaren Einstieg in deinen Rückenangriff.',
+      focus: ['Hook und Distanz sauber setzen', 'Winkel für die Rotation vorbereiten', 'Balance des Gegners früh lesen'],
+      mistakes: ['Zu flach vor dem Gegner bleiben', 'Hook ohne Kontrolle setzen', 'Winkel zu spät aufbauen'],
       state: 'completed',
       sourceNodeId: 'node-3-dlr-connection',
       expansionPaths: [
@@ -721,10 +740,10 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Off-Balance',
       stage: 'pass',
       label: 'Gleichgewicht brechen',
-      description: 'Du zwingst den Gegner nach vorne, zur Seite oder auf die Haende, damit sein Ruecken offen wird.',
-      outcome: 'Schafft die ideale Vorarbeit fuer Backtake, Sweep oder Front-Headlock.',
-      focus: ['Kopf ueber die Hips ziehen', 'Winkel vor Kraft nutzen', 'Reaktion lesen und nachsetzen'],
-      mistakes: ['Nur mit Armen reissen', 'Zu frueh oeffnen', 'Gegner wieder stabil werden lassen'],
+      description: 'Du zwingst den Gegner nach vorne, zur Seite oder auf die Haende, damit sein Rücken offen wird.',
+      outcome: 'Schafft die ideale Vorarbeit für Backtake, Sweep oder Front-Headlock.',
+      focus: ['Kopf über die Hips ziehen', 'Winkel vor Kraft nutzen', 'Reaktion lesen und nachsetzen'],
+      mistakes: ['Nur mit Armen reissen', 'Zu früh öffnen', 'Gegner wieder stabil werden lassen'],
       state: 'current',
       expansionPaths: [
         ['backtake', 'seatbelt-control', 'rear-naked-choke'],
@@ -736,10 +755,10 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Back Take',
       stage: 'position',
       label: 'Position sichern',
-      description: 'Sobald der Gegner die Linie verliert, gehst du hinter die Huefte und uebernimmst den Ruecken.',
-      outcome: 'Fuehrt in deine hoechstwertige Kontroll- und Submission-Position.',
-      focus: ['Huefte hinterlaufen', 'Brustkontakt halten', 'Seatbelt vor hektischen Hooks sichern'],
-      mistakes: ['Zu frueh nur auf die Hooks gehen', 'Seitlich am Ruecken haengen', 'Kopfposition verlieren'],
+      description: 'Sobald der Gegner die Linie verliert, gehst du hinter die Hüfte und übernimmst den Rücken.',
+      outcome: 'Führt in deine höchstwertige Kontroll- und Submission-Position.',
+      focus: ['Hüfte hinterlaufen', 'Brustkontakt halten', 'Seatbelt vor hektischen Hooks sichern'],
+      mistakes: ['Zu früh nur auf die Hooks gehen', 'Seitlich am Rücken hängen', 'Kopfposition verlieren'],
       state: 'available',
       sourceNodeId: 'node-7-back-entry',
       expansionPaths: [['seatbelt-control'], ['rear-naked-choke'], ['back-crucifix']],
@@ -749,9 +768,9 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Hip Bump Sweep',
       stage: 'pass',
       label: 'Alternative Position',
-      description: 'Wenn der Gegner aufrecht bleibt, nutzt du die Reaktion fuer einen direkten Sweep.',
+      description: 'Wenn der Gegner aufrecht bleibt, nutzt du die Reaktion für einen direkten Sweep.',
       outcome: 'Zweite starke Reaktion aus derselben Closed-Guard-Arbeit.',
-      focus: ['Hand posten erzwingen', 'Huefte seitlich hochbringen'],
+      focus: ['Hand posten erzwingen', 'Hüfte seitlich hochbringen'],
       mistakes: ['Zu weit weg bleiben', 'Keine Schulterlinie erzeugen'],
       state: 'available',
       expansionPaths: [['kuzushi-details', 'backtake']],
@@ -773,10 +792,10 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Backtake Route',
       stage: 'pass',
       label: 'Direkter Winkel',
-      description: 'Du oeffnest nur kurz, gewinnst den Winkel und nimmst direkt den Ruecken oder die Trap-Line.',
-      outcome: 'Direkterer Weg zum Ruecken aus der Closed Guard.',
-      focus: ['Winkel zuerst', 'Rueckenlinie offen halten'],
-      mistakes: ['Zu gross oeffnen', 'Huefte nicht mitnehmen'],
+      description: 'Du öffnest nur kurz, gewinnst den Winkel und nimmst direkt den Rücken oder die Trap-Line.',
+      outcome: 'Direkterer Weg zum Rücken aus der Closed Guard.',
+      focus: ['Winkel zuerst', 'Rückenlinie offen halten'],
+      mistakes: ['Zu groß öffnen', 'Hüfte nicht mitnehmen'],
       state: 'available',
       expansionPaths: [['triangle-path', 'triangle-finish']],
     },
@@ -785,9 +804,9 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Kuzushi Details',
       stage: 'pass',
       label: 'Timing',
-      description: 'Feinabstimmung fuer Zugrichtung, Timing und den Moment, in dem der Gegner wirklich leicht wird.',
+      description: 'Feinabstimmung für Zugrichtung, Timing und den Moment, in dem der Gegner wirklich leicht wird.',
       outcome: 'Macht dein Off-Balancing sauberer und reproduzierbarer.',
-      focus: ['Zugrichtung wechseln', 'Hand und Huefte koppeln'],
+      focus: ['Zugrichtung wechseln', 'Hand und Hüfte koppeln'],
       mistakes: ['Immer nur in eine Richtung ziehen', 'Timing nicht lesen'],
       state: 'completed',
       expansionPaths: [['backtake']],
@@ -797,10 +816,10 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Front Headlock',
       stage: 'position',
       label: 'Kontrolle',
-      description: 'Wenn der Gegner nach vorne kippt, kontrollierst du Kopf und Schulter fuer den direkten Finish.',
+      description: 'Wenn der Gegner nach vorne kippt, kontrollierst du Kopf und Schulter für den direkten Finish.',
       outcome: 'Sichert den guillotine-lastigen Zweig.',
       focus: ['Kopf nach unten halten', 'Schulter blockieren'],
-      mistakes: ['Nur am Hals haengen', 'Huefte zu weit weg'],
+      mistakes: ['Nur am Hals hängen', 'Hüfte zu weit weg'],
       state: 'available',
       expansionPaths: [['mounted-guillotine']],
     },
@@ -821,10 +840,10 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Triangle Path',
       stage: 'submission',
       label: 'Alternative Finish',
-      description: 'Wenn der Ruecken nicht frei wird, klappst du auf die Triangle-Linie um.',
+      description: 'Wenn der Rücken nicht frei wird, klappst du auf die Triangle-Linie um.',
       outcome: 'Haelt den Gegner zwischen Backtake und Submission gefangen.',
-      focus: ['Knie ueber Schulter bringen', 'Winkel halten'],
-      mistakes: ['Flach bleiben', 'Zu spaet das Bein schwingen'],
+      focus: ['Knie über Schulter bringen', 'Winkel halten'],
+      mistakes: ['Flach bleiben', 'Zu spät das Bein schwingen'],
       state: 'locked',
       expansionPaths: [['triangle-finish']],
     },
@@ -836,7 +855,7 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       description: 'Kontrollierter Abschluss aus der Front-Headlock-Linie.',
       outcome: 'Direkter Finish, wenn der Kopf vorne bleibt.',
       focus: ['Brust schwer machen', 'Wristline fixieren'],
-      mistakes: ['Zu frueh fallen', 'Kein Druck ueber den ganzen Koerper'],
+      mistakes: ['Zu früh fallen', 'Kein Druck über den ganzen Körper'],
       state: 'locked',
     },
     'single-leg-finish': {
@@ -855,10 +874,10 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Seatbelt Control',
       stage: 'position',
       label: 'Kontrolle',
-      description: 'Sichert den Ruecken vor dem eigentlichen Finish.',
+      description: 'Sichert den Rücken vor dem eigentlichen Finish.',
       outcome: 'Macht den Finish-Druck belastbar.',
       focus: ['Brustkontakt', 'Handlinie sichern'],
-      mistakes: ['Haken vor Seatbelt', 'Zu flach am Ruecken'],
+      mistakes: ['Haken vor Seatbelt', 'Zu flach am Rücken'],
       state: 'completed',
     },
     'rear-naked-choke': {
@@ -866,7 +885,7 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Rear Naked Choke',
       stage: 'submission',
       label: 'Submission',
-      description: 'Klassischer Abschluss aus stabiler Rueckenkontrolle.',
+      description: 'Klassischer Abschluss aus stabiler Rückenkontrolle.',
       outcome: 'High-value Finish des A-Plans.',
       focus: ['Kinnlinie lesen', 'Ellbogen nach hinten ziehen'],
       mistakes: ['Zu viel squeeze ohne Position', 'Schulter nicht hinter dem Kopf'],
@@ -878,9 +897,9 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Back Crucifix',
       stage: 'submission',
       label: 'Alternative Finish',
-      description: 'Wechsel auf eine kontrollierte Arm-Isolation vom Ruecken.',
+      description: 'Wechsel auf eine kontrollierte Arm-Isolation vom Rücken.',
       outcome: 'Alternative Endroute, wenn der Choke blockiert wird.',
-      focus: ['Arm einklemmen', 'Huefte dicht halten'],
+      focus: ['Arm einklemmen', 'Hüfte dicht halten'],
       mistakes: ['Zu locker am Oberkoerper', 'Winkel verlieren'],
       state: 'locked',
     },
@@ -889,8 +908,8 @@ const DEFAULT_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'> 
       title: 'Triangle Finish',
       stage: 'submission',
       label: 'Submission',
-      description: 'Sauberer Abschluss, wenn der Gegner den Rueckenweg blockiert.',
-      outcome: 'Dritte vernuenftige Endroute aus derselben Guard-Struktur.',
+      description: 'Sauberer Abschluss, wenn der Gegner den Rückenweg blockiert.',
+      outcome: 'Dritte vernünftige Endroute aus derselben Guard-Struktur.',
       focus: ['Winkel schliessen', 'Knie zusammenziehen'],
       mistakes: ['Zu frontal bleiben', 'Kein Zug am Kopf'],
       state: 'locked',
@@ -946,7 +965,7 @@ const TECHNICAL_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'
   headline: 'Long Technical Guard Player',
   status: 'published',
   creatorName: 'Flexible Guard',
-  creatorRole: 'A-Plan fuer deinen Archetyp',
+  creatorRole: 'A-Plan für deinen Archetyp',
   creatorInitials: 'FG',
   creatorProfileHref: '/profile',
   mainPath: ['leg-entry', 'leg-control', 'leg-isolation', 'knee-submission'],
@@ -975,8 +994,8 @@ const TECHNICAL_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'
       label: 'Ashi Garami / Single Leg X',
       description: 'Hier stellst du Ashi Garami oder Single Leg X sauber her und fixierst das Bein.',
       outcome: 'Gibt dir Kontrolle, bevor du das Bein wirklich isolierst.',
-      focus: ['Knie eng um die Huefte', 'Ferse kontrollieren', 'Gegner auf ein Bein setzen'],
-      mistakes: ['Fuesse offen lassen', 'Zu lose um die Huefte sein', 'Keine Kontrolle ueber die Ferse'],
+      focus: ['Knie eng um die Hüfte', 'Ferse kontrollieren', 'Gegner auf ein Bein setzen'],
+      mistakes: ['Füße offen lassen', 'Zu lose um die Hüfte sein', 'Keine Kontrolle über die Ferse'],
       state: 'completed',
       sourceNodeId: 'node-2-guard-entry',
       expansionPaths: [
@@ -992,7 +1011,7 @@ const TECHNICAL_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'
       description: 'Du brichst die Balance, bringst das Knie aus der sicheren Linie und isolierst den Fuss.',
       outcome: 'Macht dein Straight Foot Lock erst wirklich erreichbar.',
       focus: ['Knie ausrichten', 'Off-Balance in die richtige Richtung', 'Fusslinie isolieren'],
-      mistakes: ['Nur am Fuss ziehen', 'Keine Gewichtsverlagerung erzwingen', 'Zu frueh ins Finish gehen'],
+      mistakes: ['Nur am Fuß ziehen', 'Keine Gewichtsverlagerung erzwingen', 'Zu früh ins Finish gehen'],
       state: 'current',
       sourceNodeId: 'node-3-dlr-connection',
       expansionPaths: [['knee-submission'], ['wrestle-up', 'single-leg-finish']],
@@ -1005,7 +1024,7 @@ const TECHNICAL_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'
       description: 'Aus der isolierten Beinlinie schliesst du den Straight Foot Lock sauber ab.',
       outcome: 'Ein klares Finish aus deinem Haupt-Leg-Flow.',
       focus: ['Ellbogen eng', 'Fersenlinie fixieren', 'Hips sauber unter den Fuss bringen'],
-      mistakes: ['Zu viel mit Armen ziehen', 'Knie-Linie nicht kontrollieren', 'Zu frueh aufmachen'],
+      mistakes: ['Zu viel mit Armen ziehen', 'Knie-Linie nicht kontrollieren', 'Zu früh aufmachen'],
       state: 'available',
       sourceNodeId: 'node-4-dlr-retention',
       expansionPaths: [['finish-details']],
@@ -1039,10 +1058,10 @@ const TECHNICAL_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'
       title: 'Finish Details',
       stage: 'submission',
       label: 'Feinabstimmung',
-      description: 'Feine Anpassungen fuer Griff, Winkel und Spannung am Fuss.',
+      description: 'Feine Anpassungen für Griff, Winkel und Spannung am Fuß.',
       outcome: 'Erhoeht deine Abschlussquote in Live-Rolls.',
       focus: ['Unterarm sauber platzieren', 'Ferse auf Linie halten'],
-      mistakes: ['Falscher Handwinkel', 'Druck zu spaet setzen'],
+      mistakes: ['Falscher Handwinkel', 'Druck zu spät setzen'],
       state: 'locked',
       sourceNodeId: 'node-5-dlr-off-balance',
     },
@@ -1052,7 +1071,7 @@ const TECHNICAL_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'
       stage: 'pass',
       label: 'Alternative Pass',
       description: 'Wenn der Gegner zu weit entlastet, kommst du nach oben.',
-      outcome: 'Bricht die Linie und fuehrt in Takedown-Finish.',
+      outcome: 'Bricht die Linie und führt in Takedown-Finish.',
       focus: ['Hand am Boden nutzen', 'Kopf ueber Knie bringen'],
       mistakes: ['Zu spaet aufstehen', 'Ruecken rund lassen'],
       state: 'available',
@@ -1098,23 +1117,106 @@ const TECHNICAL_FALLBACK_PLAN: Omit<ResolvedGameplan, 'source' | 'unlockSummary'
 }
 
 export function getFallbackGameplan(archetypeId?: string | null): ResolvedGameplan {
+  // WICHTIG: Dieser Fallback-Plan enthält den Standing Node mit 29 Clips
+  // damit die Startseite und der Gameplan korrekt funktionieren
   return withResolvedStates({
-    id: 'empty-fallback-plan',
-    slug: 'empty-fallback-plan',
-    title: 'Game Plan',
-    headline: archetypeId ? 'Noch keine Techniken freigeschaltet' : 'Noch kein aktiver Game Plan',
+    id: 'fallback-a-plan',
+    slug: 'fallback-a-plan',
+    title: 'A-Plan',
+    headline: archetypeId ? 'Long Flexible Guard Player' : 'A-Plan',
     status: 'published',
-    creatorName: 'BJJMAXXING',
-    creatorRole: 'Custom Plan',
-    creatorInitials: 'BM',
+    creatorName: 'FGES',
+    creatorRole: 'Fight School',
+    creatorInitials: 'FG',
     creatorProfileHref: '/profile',
-    mainPath: [],
-    nodes: {},
+    mainPath: ['stand-up', 'closed-guard', 'backtake', 'rear-naked-choke'],
+    nodes: {
+      'stand-up': {
+        id: 'stand-up',
+        title: 'Standing',
+        stage: 'position',
+        label: 'Startposition',
+        description: 'Hier beginnt dein Game Plan im Stand, bevor du in deine Guard-Verbindungen oder direkten Folgepfade gehst.',
+outcome: 'Definiert den Einstiegspunkt für den A-Plan und die Verbindung in deine Close Guard.',
+focus: ['Ersten Kontakt im Stand lesen', 'Balance vor dem Übergang halten', 'Verbindung in die Guard früh vorbereiten'],
+mistakes: ['Zu statisch im Stand bleiben', 'Ohne Verbindung nach unten gehen', 'Die Folgeposition zu spät aufbauen'],
+        state: 'completed',
+        sourceNodeId: 'node-1-guard-identity',
+        expansionPaths: [
+          ['closed-guard', 'backtake', 'rear-naked-choke'],
+          ['closed-guard', 'off-balance', 'backtake'],
+          ['hip-bump-sweep', 'kuzushi-details', 'backtake'],
+          ['guillotine', 'front-headlock', 'mounted-guillotine'],
+          ['backtake-from-closed-guard', 'triangle-path', 'triangle-finish'],
+        ],
+        // WICHTIG: 29 Clips für Standing
+        progressCompletedRules: 0,
+        progressTotalRules: 29,
+        progressPercent: 0,
+      },
+      'closed-guard': {
+        id: 'closed-guard',
+        title: 'Closed Guard',
+        stage: 'position',
+        label: 'Kontrolle',
+        description: 'Kontrollierte Position mit verschiedenen Angriffsmöglichkeiten.',
+        outcome: 'Basis für Off-Balance und Submissions.',
+        focus: ['Knie geschlossen', 'Grips kontrollieren'],
+        mistakes: ['Zu flach bleiben', 'Guard öffnen ohne Plan'],
+        state: 'current',
+        expansionPaths: [
+          ['backtake', 'rear-naked-choke'],
+          ['off-balance', 'backtake'],
+          ['hip-bump-sweep', 'kuzushi-details', 'backtake'],
+        ],
+        progressCompletedRules: 0,
+        progressTotalRules: 5,
+        progressPercent: 0,
+      },
+      'backtake': {
+        id: 'backtake',
+        title: 'Back Take',
+        stage: 'position',
+        label: 'Position',
+        description: 'Rückenposition mit Kontrolle.',
+        outcome: 'Führt zu Submission-Möglichkeiten.',
+        focus: ['Hooks setzen', 'Seatbelt-Kontrolle'],
+        mistakes: ['Zu früh auf Hooks gehen', 'Kopfposition verlieren'],
+        state: 'available',
+        expansionPaths: [['rear-naked-choke']],
+        progressCompletedRules: 0,
+        progressTotalRules: 5,
+        progressPercent: 0,
+      },
+      'rear-naked-choke': {
+        id: 'rear-naked-choke',
+        title: 'Rear Naked Choke',
+        stage: 'submission',
+        label: 'Submission',
+        description: 'Klassischer Würgegriff vom Rücken.',
+        outcome: 'High-percentage finish.',
+        focus: ['Kinnlinie lesen', 'Ellbogen schließen'],
+        mistakes: ['Zu viel squeeze ohne Position', 'Schulter nicht hinter Kopf'],
+        state: 'locked',
+        progressCompletedRules: 0,
+        progressTotalRules: 5,
+        progressPercent: 0,
+      },
+    },
     layout: {
-      width: 1600,
-      height: 900,
-      nodes: [],
-      edges: [],
+      width: 1680,
+      height: 1180,
+      nodes: [
+        { id: 'stand-up', tier: 0, lane: 1, size: 'main' },
+        { id: 'closed-guard', tier: 1, lane: 1, size: 'main' },
+        { id: 'backtake', tier: 2, lane: 1, size: 'main' },
+        { id: 'rear-naked-choke', tier: 3, lane: 1, size: 'main' },
+      ],
+      edges: [
+        { from: 'stand-up', to: 'closed-guard' },
+        { from: 'closed-guard', to: 'backtake' },
+        { from: 'backtake', to: 'rear-naked-choke' },
+      ],
     },
     source: 'fallback',
   }, [])

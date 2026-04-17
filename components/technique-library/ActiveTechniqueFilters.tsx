@@ -26,7 +26,7 @@ export function ActiveTechniqueFilters({ chips, onRemove, onReset }: ActiveTechn
           onClick={onReset}
           className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-white/62 transition hover:border-bjj-gold/30 hover:text-white"
         >
-          Alles zuruecksetzen
+          Alles zurücksetzen
         </button>
       </div>
 

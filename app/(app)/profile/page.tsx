@@ -25,6 +25,7 @@ type ProfileData = {
   tiktok_url: string | null
   instagram_url: string | null
   facebook_url: string | null
+  techniques_learned_count: number
 }
 
 type SocialPlatform = 'youtube' | 'instagram' | 'tiktok' | 'facebook'
@@ -63,7 +64,7 @@ const CONNECT_PROVIDERS: ConnectProvider[] = [
     label: 'Facebook',
     provider: 'facebook',
     supported: true,
-    description: 'Verbinde Facebook fuer Profilbild und Social Login.',
+    description: 'Verbinde Facebook für Profilbild und Social Login.',
     accent: 'text-[#7da4ff]',
     Icon: Facebook,
     shortLabel: 'FB',
@@ -166,7 +167,7 @@ export default function ProfilePage() {
     setUserId(user.id)
 
     const profileSelects = [
-      'email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location, social_link, youtube_url, tiktok_url, instagram_url, facebook_url',
+      'email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location, social_link, youtube_url, tiktok_url, instagram_url, facebook_url, techniques_learned_count',
       'email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location, social_link',
       'email, username, full_name, avatar_url, belt, primary_archetype, nationality, gym_name, gym_unlisted_name, gym_location',
       'email, username, full_name, avatar_url, belt, primary_archetype, gym_name, gym_unlisted_name, gym_location',
@@ -194,6 +195,7 @@ export default function ProfilePage() {
               tiktok_url: null,
               instagram_url: null,
               facebook_url: null,
+              techniques_learned_count: 0,
               ...profileResult.data,
             }
           : null
@@ -219,6 +221,7 @@ export default function ProfilePage() {
       tiktok_url: profileData?.tiktok_url ?? null,
       instagram_url: profileData?.instagram_url ?? null,
       facebook_url: profileData?.facebook_url ?? null,
+      techniques_learned_count: profileData?.techniques_learned_count ?? 0,
     })
     setAvatarDraft(profileData?.avatar_url ?? '')
     setSocialLinkDrafts({
@@ -465,6 +468,14 @@ export default function ProfilePage() {
                       {archetype.name}
                     </span>
                   </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-bjj-gold/20 bg-bjj-gold/10 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-bjj-gold">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-bjj-gold/20 text-[10px]">
+                        {profile?.techniques_learned_count ?? 0}
+                      </span>
+                      Gelernte Clips
+                    </span>
+                  </div>
                 </div>
             </div>
 
@@ -497,7 +508,7 @@ export default function ProfilePage() {
                 <p className="text-xs font-black uppercase tracking-[0.24em] text-bjj-gold">Social Media</p>
                 <h2 className="mt-2 text-lg font-black tracking-[-0.03em] text-white">Verbindungen verwalten</h2>
                 <p className="mt-1 text-sm leading-relaxed text-bjj-muted">
-                  Verbinde deine Accounts fuer Avatar, Login und spaetere Social Features. Wir fragen erst beim Klick nach einer Freigabe.
+                  Verbinde deine Accounts für Avatar, Login und spätere Social Features. Wir fragen erst beim Klick nach einer Freigabe.
                 </p>
                 <div className="mt-3 grid grid-cols-2 gap-2.5">
                   {CONNECT_PROVIDERS.map((entry) => {
@@ -542,7 +553,7 @@ export default function ProfilePage() {
                 </div>
                 <h2 className="mt-2 text-lg font-black tracking-[-0.03em] text-white">Deine oeffentlichen Profile</h2>
                 <p className="mt-1 text-sm leading-relaxed text-bjj-muted">
-                  Hinterlege deine Links einzeln, damit andere direkt zu deinen Kanaelen springen koennen.
+                  Hinterlege deine Links einzeln, damit andere direkt zu deinen Kanälen springen können.
                 </p>
                 <div className="mt-3 rounded-2xl border border-black/20 bg-[#111827] p-4">
                   <div className="flex flex-col gap-3">

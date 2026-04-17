@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Bell, BookOpen, ChevronLeft, ChevronRight, DatabaseZap, Grid3X3, Home, MapPin, Sparkles, User2, Waypoints } from 'lucide-react'
@@ -36,12 +36,14 @@ type LayoutProfile = {
   primary_archetype?: string | null
   nationality?: string | null
   email?: string | null
+  gym_name?: string | null
+  gym_place_id?: string | null
 } | null
 
 async function loadLayoutProfileSafe(supabase: ReturnType<typeof createClient>, userId: string) {
   const attempts = [
-    'username, full_name, avatar_url, primary_archetype, nationality, email',
-    'username, full_name, avatar_url, primary_archetype, email',
+    'username, full_name, avatar_url, primary_archetype, nationality, email, gym_name, gym_place_id',
+    'username, full_name, avatar_url, primary_archetype, email, gym_name, gym_place_id',
     'full_name, avatar_url, primary_archetype, email',
   ]
 
@@ -54,6 +56,8 @@ async function loadLayoutProfileSafe(supabase: ReturnType<typeof createClient>, 
           avatar_url: null,
           nationality: null,
           email: null,
+          gym_name: null,
+          gym_place_id: null,
           ...(result.data ?? {}),
         } as LayoutProfile,
       }
@@ -78,6 +82,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [nationality, setNationality] = useState<string | null>(null)
   const [hasCoreProfile, setHasCoreProfile] = useState(false)
   const [isGameplanImmersive, setIsGameplanImmersive] = useState(false)
+  
+  // WICHTIG: Verhindert Redirect-Loops
+  const hasRedirectedRef = useRef(false)
 
   useEffect(() => {
     const saved = window.localStorage.getItem('bjj-sidebar-collapsed')
@@ -105,7 +112,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       const profile = profileResult.data
       const hasUsername = Boolean(profile?.username ?? profile?.full_name)
       const hasArchetype = Boolean(profile?.primary_archetype)
-      const hasCoreProfile = hasUsername && hasArchetype
+      const hasGym = Boolean(profile?.gym_name || profile?.gym_place_id)
+      const hasCoreProfile = hasUsername && hasArchetype && hasGym
 
       setDisplayName(profile?.username ?? profile?.full_name ?? 'BJJ Athlete')
       setAvatarUrl(profile?.avatar_url ?? null)
@@ -116,9 +124,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       setHasCoreProfile(hasCoreProfile)
       setProfileStateLoaded(true)
 
-      const onboardingAllowedPaths = ['/', '/archetype-test', '/archetype-result', '/profile']
-      if (!hasCoreProfile && !onboardingAllowedPaths.some((allowed) => pathname === allowed || pathname.startsWith(`${allowed}/`))) {
-        router.push('/')
+      // WICHTIG: Onboarding-Logik nur ausführen wenn Profil geladen
+      // und NICHT auf einer erlaubten Seite
+      const onboardingPaths = ['/name-input', '/onboarding', '/archetype-test', '/archetype-result', '/login', '/register']
+      const isOnOnboardingPage = onboardingPaths.some(p => pathname === p || pathname.startsWith(`${p}/`))
+      
+      // Wenn kein vollständiges Profil UND nicht auf Onboarding-Seite → redirect
+      // ABER NUR EINMAL (verhindert Loop)
+      if (!hasCoreProfile && !isOnOnboardingPage && !hasRedirectedRef.current) {
+        hasRedirectedRef.current = true
+        
+        // Redirect je nach Status
+        if (!hasUsername || !hasArchetype) {
+          // Noch kein Name/Archetyp
+          router.push('/name-input')
+        } else if (!hasGym) {
+          // Name/Archetyp da, aber kein Gym
+          router.push('/onboarding')
+        }
       }
     }
 
@@ -131,6 +154,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener('profile-ready-changed', onProfileRefresh)
     return () => window.removeEventListener('profile-ready-changed', onProfileRefresh)
   }, [pathname, router, supabase])
+  
+  // WICHTIG: Reset redirect flag when pathname changes to a different page
+  // Das erlaubt erneute redirects wenn User manuell navigiert
+  useEffect(() => {
+    // Reset wenn wir auf einer "sicheren" Seite sind (nicht während redirect)
+    const onboardingPaths = ['/name-input', '/onboarding', '/archetype-test', '/archetype-result', '/login', '/register']
+    const isOnOnboardingPage = onboardingPaths.some(p => pathname === p || pathname.startsWith(`${p}/`))
+    
+    // Nur reset wenn wir auf einer Onboarding-Seite gelandet sind
+    if (isOnOnboardingPage) {
+      hasRedirectedRef.current = false
+    }
+  }, [pathname])
 
   useEffect(() => {
     if (!pathname.startsWith('/gameplan')) {

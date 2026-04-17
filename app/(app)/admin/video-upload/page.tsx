@@ -206,7 +206,7 @@ export default function AdminVideoUploadPage() {
 
     if (!payload.clip?.id) {
       setSaving(false)
-      setError('Clip wurde gespeichert, aber die Clip-ID fehlt fuer die Technik-Zuordnung.')
+      setError('Clip wurde gespeichert, aber die Clip-ID fehlt für die Technik-Zuordnung.')
       return
     }
 
@@ -235,11 +235,11 @@ export default function AdminVideoUploadPage() {
       return
     }
 
-    const techniqueLabel = selectedTechnique ? ` fuer ${selectedTechnique.title}` : ''
+    const techniqueLabel = selectedTechnique ? ` für ${selectedTechnique.title}` : ''
     setSuccess(
       payload.existing
-        ? `Clip war schon im Archiv und ist jetzt${techniqueLabel} verknuepft.`
-        : `Clip wurde gespeichert und${techniqueLabel} verknuepft.`
+        ? `Clip war schon im Archiv und ist jetzt${techniqueLabel} verknüpft.`
+        : `Clip wurde gespeichert und${techniqueLabel} verknüpft.`
     )
   }
 
@@ -250,7 +250,7 @@ export default function AdminVideoUploadPage() {
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Admin Clips</p>
           <h1 className="mt-2 font-display text-3xl font-black text-white">Video hochladen</h1>
           <p className="mt-2 max-w-2xl text-sm leading-7 text-bjj-muted">
-            Speichere YouTube-Videos und Shorts direkt im Clip-Archiv. Der Clip wird automatisch der ausgewaehlten Technik zugeordnet.
+            Speichere YouTube-Videos und Shorts direkt im Clip-Archiv. Der Clip wird automatisch der ausgewählten Technik zugeordnet.
           </p>
         </div>
         <Link
@@ -495,7 +495,7 @@ export default function AdminVideoUploadPage() {
           </div>
 
           <div className="rounded-[2rem] border border-bjj-border bg-bjj-card p-5 text-sm leading-7 text-bjj-muted shadow-card">
-            YouTube-Videos werden automatisch geloopt und koennen direkt auf der Seite gesteuert werden.
+            YouTube-Videos werden automatisch geloopt und können direkt auf der Seite gesteuert werden.
           </div>
         </aside>
       </div>

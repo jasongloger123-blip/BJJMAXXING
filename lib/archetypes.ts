@@ -30,7 +30,7 @@ export const ARCHETYPES: Archetype[] = [
     name: 'Long Flexible Guard Player',
     tagline: 'Guard -> Off-Balance -> Backtake -> RNC',
     description:
-      'Du gewinnst ueber Guard-Retention, Winkel, Off-Balancing und mobile Backtakes. Lange Hebel und Beweglichkeit machen dich von unten gefaehrlich.',
+      'Du gewinnst über Guard-Retention, Winkel, Off-Balancing und mobile Backtakes. Lange Hebel und Beweglichkeit machen dich von unten gefährlich.',
     strengths: ['Guard Retention', 'Winkelarbeit', 'Backtakes', 'Off-Balancing', 'Leg Entries'],
     weaknesses: ['Direkter Druck', 'Crossface Control', 'Kompakte Wrestler'],
     primarySystems: ['De La Riva', 'K-Guard', 'Berimbolo', 'Triangle', 'Crab Ride'],
@@ -43,7 +43,7 @@ export const ARCHETYPES: Archetype[] = [
     id: 'long-explosive-scrambler',
     name: 'Long Explosive Scrambler',
     tagline: 'Scramble -> Back -> Submission',
-    description: 'Du lebst in Uebergaengen, Wrestle-Ups und dynamischen Entries.',
+    description: 'Du lebst in Übergängen, Wrestle-Ups und dynamischen Entries.',
     strengths: ['Scrambles', 'Backtakes', 'Single Leg', 'Front Headlock'],
     weaknesses: ['Statisches Top Game', 'Geduldiger Druck'],
     primarySystems: ['Arm Drag', 'Single Leg', 'Wrestle-Up'],
@@ -69,7 +69,7 @@ export const ARCHETYPES: Archetype[] = [
     id: 'compact-pressure-passer',
     name: 'Compact Pressure Passer',
     tagline: 'Pass -> Mount -> Submission',
-    description: 'Kontrolle ist deine Sprache. Du passt mit Koerperdruck und haeltst Positionen sauber.',
+    description: 'Kontrolle ist deine Sprache. Du passt mit Körperdruck und hältst Positionen sauber.',
     strengths: ['Guard Passing', 'Crossface', 'Half Guard Smash'],
     weaknesses: ['Mobile Open Guards', 'Berimbolo-Spieler'],
     primarySystems: ['Bodylock', 'Over-Under', 'Knee Cut'],
@@ -82,7 +82,7 @@ export const ARCHETYPES: Archetype[] = [
     id: 'heavy-pressure-grappler',
     name: 'Heavy Pressure Grappler',
     tagline: 'Top Control -> Isolieren -> Erdruecken',
-    description: 'Du gewinnst ueber Gewicht, Stabilitaet und konsequentes Zermuerben.',
+    description: 'Du gewinnst über Gewicht, Stabilität und konsequentes Zermürben.',
     strengths: ['Mount Pressure', 'Side Control', 'Arm Triangle'],
     weaknesses: ['Mobile Guard Player', 'Schnelle Scrambles'],
     primarySystems: ['Side Control', 'Arm Triangle', 'Head and Arm'],
@@ -95,7 +95,7 @@ export const ARCHETYPES: Archetype[] = [
     id: 'flexible-guard-technician',
     name: 'Flexible Guard Technician',
     tagline: 'Guard -> Leg Entry -> Sweep / Back',
-    description: 'Du spielst mit extremer Mobilitaet, Inversionen und modernen Guard-Systemen.',
+    description: 'Du spielst mit extremer Mobilität, Inversionen und modernen Guard-Systemen.',
     strengths: ['Leg Entries', 'Guard Retention', 'K-Guard', '50/50'],
     weaknesses: ['Wrestler', 'Schneller Druck'],
     primarySystems: ['K-Guard', 'Matrix', 'Inside Sankaku', '50/50'],
@@ -109,7 +109,7 @@ export const ARCHETYPES: Archetype[] = [
 export const QUESTIONS: Question[] = [
   {
     id: 'build',
-    question: 'Welche Koerperform passt am besten zu dir?',
+    question: 'Welche Körperform passt am besten zu dir?',
     options: [
       {
         label: 'Lang & schlank',
@@ -134,7 +134,7 @@ export const QUESTIONS: Question[] = [
   {
     id: 'flexibility',
     question: 'Wie beweglich bist du?',
-    helper: 'Denk an Guard-Winkel, Inversionen und aktive Mobilitaet.',
+    helper: 'Denk an Guard-Winkel, Inversionen und aktive Mobilität.',
     options: [
       {
         label: 'Sehr flexibel',
@@ -159,7 +159,7 @@ export const QUESTIONS: Question[] = [
   {
     id: 'explosivity',
     question: 'Wie explodierst du?',
-    helper: 'Geht deine erste Aktion eher ueber Speed oder ueber Kontrolle?',
+    helper: 'Geht deine erste Aktion eher über Speed oder über Kontrolle?',
     options: [
       {
         label: 'Sehr explosiv',
@@ -175,7 +175,7 @@ export const QUESTIONS: Question[] = [
       },
       {
         label: 'Stark & konstant',
-        description: 'Weniger Burst, mehr Druck ueber Zeit',
+        description: 'Weniger Burst, mehr Druck über Zeit',
         icon: '🪨',
         scores: { 'heavy-pressure-grappler': 2, 'compact-pressure-passer': 2 },
       },
@@ -200,13 +200,13 @@ export const QUESTIONS: Question[] = [
       },
       {
         label: 'Scramble',
-        description: 'Chaotische Uebergaenge sind okay fuer mich',
+        description: 'Chaotische Übergänge sind okay für mich',
         icon: '🔄',
         scores: { 'long-explosive-scrambler': 2, 'compact-explosive-wrestler': 1 },
       },
       {
         label: 'Absichern',
-        description: 'Ich ueberlebe erst mal und arbeite mich raus',
+        description: 'Ich überlebe erst mal und arbeite mich raus',
         icon: '🧷',
         scores: { 'compact-pressure-passer': 1, 'heavy-pressure-grappler': 1 },
       },
@@ -215,7 +215,7 @@ export const QUESTIONS: Question[] = [
   {
     id: 'passing',
     question: 'Wie gehst du lieber nach vorne?',
-    helper: 'Wenn du angreifst: eher Druck, Bewegung oder Praezision?',
+    helper: 'Wenn du angreifst: eher Druck, Bewegung oder Präzision?',
     options: [
       {
         label: 'Mit Druck',

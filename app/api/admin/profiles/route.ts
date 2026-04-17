@@ -102,7 +102,8 @@ export async function GET(request: Request) {
           instagram_url,
           tiktok_url,
           facebook_url,
-          created_at
+          created_at,
+          techniques_learned_count
         `)
         .order('created_at', { ascending: false })
 
@@ -136,6 +137,7 @@ export async function GET(request: Request) {
             instagram_url: null,
             tiktok_url: null,
             facebook_url: null,
+            techniques_learned_count: profile.techniques_learned_count ?? 0,
           }))
         }
       } else {
@@ -190,6 +192,7 @@ export async function GET(request: Request) {
         validated_nodes: stats.validated,
         total_progress: Math.max(0, stats.completed + stats.validated),
         training_events: stats.events,
+        techniques_learned_count: profile.techniques_learned_count ?? 0,
       }
     })
 

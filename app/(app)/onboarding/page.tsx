@@ -24,28 +24,41 @@ export default function OnboardingPage() {
 
   // Prüfe ob User bereits ein Gym hat
   const checkExistingGym = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-    if (!user) {
-      router.push('/login')
-      return
+      if (!user) {
+        router.push('/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('gym_name, gym_place_id, full_name, primary_archetype')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      // WICHTIG: Wenn noch kein Name ODER kein Archetyp, redirect zur passenden Onboarding-Seite
+      if (!profile?.full_name || !profile?.primary_archetype) {
+        // Noch kein Archetyp/Name → redirect zu name-input
+        router.push('/name-input')
+        return
+      }
+
+      // Wenn bereits Gym vorhanden, direkt zur Startseite
+      if (profile?.gym_name || profile?.gym_place_id) {
+        router.push('/')
+        return
+      }
+
+      // Name und Archetyp vorhanden, aber kein Gym → hier bleiben
+    } catch (error) {
+      console.error('Error checking gym:', error)
+    } finally {
+      setChecking(false)
     }
-
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('gym_name, gym_place_id')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    // Wenn bereits Gym vorhanden, direkt zur Startseite
-    if (profile?.gym_name || profile?.gym_place_id) {
-      router.push('/')
-      return
-    }
-
-    setChecking(false)
   }, [router, supabase])
 
   useEffect(() => {

@@ -179,7 +179,7 @@ export function GameplanClipDeck({ clips, detailHref, detailCtaLabel }: Gameplan
               rel="noreferrer"
               className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08),transparent_50%),linear-gradient(180deg,#272f3f,#131924)] px-6 text-center"
             >
-              <span className="text-sm font-semibold text-white/84">Video extern oeffnen</span>
+              <span className="text-sm font-semibold text-white/84">Video extern öffnen</span>
             </a>
           )}
         </div>

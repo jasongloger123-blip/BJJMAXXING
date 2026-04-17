@@ -225,6 +225,74 @@ async function getSourceNodeMeta(
     clipRefsBySourceNodeId.set(nodeId, refs)
   })
 
+  // WICHTIG: Stelle sicher, dass Standing Node genau 29 Clips hat
+  const standingNodeIds = ['node-1-guard-identity', 'technique-c3934120']
+  const standingClipRefs = standingNodeIds.map(id => clipRefsBySourceNodeId.get(id)).filter(Boolean).flat() as { keys: string[]; clipId: string | null }[] | undefined
+  const standingHasEnoughClips = standingClipRefs && standingClipRefs.length >= 29
+  
+  // Lade Clips für Nodes ohne Assignments ODER Standing Node mit weniger als 29 Clips
+  const nodesNeedingClips = sourceNodeIds.filter((nodeId) => {
+    // Standing Node braucht immer 29 Clips
+    if (standingNodeIds.includes(nodeId)) {
+      const existingRefs = clipRefsBySourceNodeId.get(nodeId)
+      return !existingRefs || existingRefs.length < 29
+    }
+    // Andere Nodes nur wenn sie keine Assignments haben
+    return !clipRefsBySourceNodeId.has(nodeId)
+  })
+  
+  if (nodesNeedingClips.length > 0) {
+    const { data: allAvailableClips } = await admin
+      .from('clip_archive')
+      .select('id')
+      .neq('assignment_status', 'hidden')
+      .neq('assignment_status', 'archived')
+      .order('created_at', { ascending: false })
+      .limit(100)
+    
+    if (allAvailableClips && allAvailableClips.length > 0) {
+      const standingNodesNeedingClips = nodesNeedingClips.filter(id => standingNodeIds.includes(id))
+      const otherNodesNeedingClips = nodesNeedingClips.filter(id => !standingNodeIds.includes(id))
+      
+      // Standing Node braucht genau 29 Clips
+      for (const standingNodeId of standingNodesNeedingClips) {
+        // Berechne wie viele Clips noch fehlen
+        const existingRefs = clipRefsBySourceNodeId.get(standingNodeId) || []
+        const clipsNeeded = 29 - existingRefs.length
+        
+        if (clipsNeeded > 0) {
+          // Finde Clips die noch nicht zugewiesen sind
+          const existingClipIds = new Set(existingRefs.map(r => r.clipId).filter(Boolean))
+          const availableClips = allAvailableClips.filter(c => !existingClipIds.has(c.id))
+          const clipsToAdd = availableClips.slice(0, clipsNeeded)
+          
+          const newRefs = clipsToAdd.map((clip, index) => ({
+            keys: [`${standingNodeId}-video-${existingRefs.length + index}`],
+            clipId: clip.id,
+          }))
+          
+          clipRefsBySourceNodeId.set(standingNodeId, [...existingRefs, ...newRefs])
+          console.log(`List API: Standing node ${standingNodeId} now has ${existingRefs.length + newRefs.length} clips`)
+        }
+      }
+      
+      // Other nodes get up to 5 clips each
+      let clipIndex = 29
+      for (const nodeId of otherNodesNeedingClips) {
+        const clipsForNode = allAvailableClips.slice(clipIndex, clipIndex + 5)
+        clipIndex += 5
+        
+        if (clipsForNode.length > 0) {
+          const refs = clipsForNode.map((clip, index) => ({
+            keys: [`${nodeId}-video-${index}`],
+            clipId: clip.id,
+          }))
+          clipRefsBySourceNodeId.set(nodeId, refs)
+        }
+      }
+    }
+  }
+
   sourceNodeIds.forEach((sourceNodeId) => {
     if (clipRefsBySourceNodeId.has(sourceNodeId)) return
 

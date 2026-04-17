@@ -1,12 +1,11 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import PublicAuthShell from '@/components/PublicAuthShell'
 import { readPendingArchetypeResult } from '@/lib/public-archetype-result'
-import { waitForAuthenticatedUser } from '@/lib/supabase/auth-guard'
 
 function getSafeNextPath(next: string | null) {
   if (!next || !next.startsWith('/')) {
@@ -14,6 +13,20 @@ function getSafeNextPath(next: string | null) {
   }
 
   return next
+}
+
+// Get the project reference from the Supabase URL
+const getProjectRef = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!url) return null
+  const match = url.match(/https:\/\/([^.]+)/)
+  return match?.[1] ?? null
+}
+
+// Get the expected cookie name
+const getCookieName = () => {
+  const projectRef = getProjectRef()
+  return projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
 }
 
 function LoginPageContent() {
@@ -46,29 +59,81 @@ function LoginPageContent() {
 
       if (!response.ok) {
         const message = data.error?.toLowerCase().includes('email not confirmed')
-          ? 'Diese E-Mail ist noch nicht bestaetigt. Registriere dich bitte noch einmal, damit der Account repariert wird.'
+          ? 'Diese E-Mail ist noch nicht bestätigt. Registriere dich bitte noch einmal, damit der Account repariert wird.'
           : data.error ?? 'Login fehlgeschlagen.'
         setError(message)
         setLoading(false)
         return
       }
 
-      // Now set the session in the browser client
-      const { data: signInData } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password: password.trim(),
-      })
+      // Server has set HTTP-only cookie - give browser time to process it
+      await new Promise(resolve => setTimeout(resolve, 500))
 
-      if (signInData.session) {
-        await supabase.auth.setSession({
-          access_token: signInData.session.access_token,
-          refresh_token: signInData.session.refresh_token,
-        })
+      // Manually read the cookie to verify it was set
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`
+        const parts = value.split(`; ${name}=`)
+        if (parts.length === 2) return parts.pop()?.split(';').shift() || null
+        return null
+      }
+      
+      const cookieName = getCookieName()
+      const authCookie = getCookie(cookieName)
+      console.log('Login: Auth cookie after server login:', { cookieName, hasCookie: !!authCookie, cookieLength: authCookie?.length })
+
+      // Try to get session from cookie - retry a few times
+      let session = null
+      for (let i = 0; i < 10; i++) {
+        const { data: { session: s } } = await supabase.auth.getSession()
+        if (s) {
+          session = s
+          console.log('Login: Session found on attempt', i + 1)
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 300))
       }
 
-      // Sync and redirect
-      await supabase.auth.getSession()
-      await waitForAuthenticatedUser(supabase, 8, 250)
+      // Also save token to localStorage as backup for cross-browser compatibility
+      if (session?.access_token) {
+        try {
+          localStorage.setItem('sb-auth-token', JSON.stringify({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+          }))
+          console.log('Login: Token saved to localStorage as backup')
+        } catch {}
+      }
+
+      if (!session) {
+        console.log('Login: No session from cookie, falling back to direct sign in')
+        // Fallback: try direct sign in
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password: password.trim(),
+        })
+        if (signInError) {
+          console.error('Login: Direct sign in failed:', signInError)
+          setError('Session konnte nicht erstellt werden. Bitte versuche es erneut.')
+          setLoading(false)
+          return
+        }
+        if (!signInData.session) {
+          setError('Session konnte nicht erstellt werden. Bitte versuche es erneut.')
+          setLoading(false)
+          return
+        }
+        console.log('Login: Direct sign in succeeded')
+        
+        // Save direct sign in token to localStorage too
+        if (signInData.session?.access_token) {
+          try {
+            localStorage.setItem('sb-auth-token', JSON.stringify({
+              access_token: signInData.session.access_token,
+              refresh_token: signInData.session.refresh_token,
+            }))
+          } catch {}
+        }
+      }
 
       const pendingResult = readPendingArchetypeResult()
 
@@ -88,7 +153,7 @@ function LoginPageContent() {
     <PublicAuthShell
       title={
         <>
-          Willkommen <span className="text-bjj-gold">zurueck</span>
+          Willkommen <span className="text-bjj-gold">zurück</span>
         </>
       }
       subtitle="Logge dich ein, um mit deinem Gameplan weiterzumachen."

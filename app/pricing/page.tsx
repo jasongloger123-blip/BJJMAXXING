@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { ArrowLeft, Check, Minus, Sparkles, Star, Zap } from 'lucide-react'
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { STRIPE_PRODUCTS } from '@/lib/stripe'
 import { createClient } from '@/lib/supabase/client'
@@ -14,12 +14,12 @@ const productCards = [
     badge: 'Starter',
     price: '0EUR',
     cadence: '/monat',
-    description: 'Perfekt fuer den Einstieg in die BJJMAXXING Welt.',
+    description: 'Perfekt für den Einstieg in die BJJMAXXING Welt.',
     features: [
       { label: 'Archetyp-Test und Einstieg', included: true },
       { label: 'Basis Gameplan', included: true },
       { label: 'Produkt kennenlernen', included: true },
-      { label: 'Woechentliche Video Reviews', included: false },
+      { label: 'Wöchentliche Video Reviews', included: false },
       { label: 'Live Coaching Calls', included: false },
     ],
     href: '/register',
@@ -47,8 +47,8 @@ const productCards = [
 ] as const
 
 const comparisonRows = [
-  { label: 'Koerpertyp Analyse', casual: true, maxxing: true },
-  { label: 'Persoenlicher Gameplan', casual: true, maxxing: true },
+  { label: 'Körpertyp Analyse', casual: true, maxxing: true },
+  { label: 'Persönlicher Gameplan', casual: true, maxxing: true },
   { label: 'Sparring Video Review', casual: false, maxxing: true },
   { label: 'Live Coaching Calls', casual: false, maxxing: true },
   { label: 'Premium Technik Library', casual: false, maxxing: true },
@@ -57,12 +57,12 @@ const comparisonRows = [
 
 const testimonials = [
   {
-    quote: 'Ich hatte zum ersten Mal das Gefuehl, dass mein Training in eine Richtung laeuft statt nur mehr Content zu sammeln.',
+    quote: 'Ich hatte zum ersten Mal das Gefühl, dass mein Training in eine Richtung läuft statt nur mehr Content zu sammeln.',
     name: 'Luca',
     accent: 'blue',
   },
   {
-    quote: 'Der Wechsel von Casual zu MAXXING war fuer mich der Punkt, an dem aus Inspiration ein echter Trainingsplan wurde.',
+    quote: 'Der Wechsel von Casual zu MAXXING war für mich der Punkt, an dem aus Inspiration ein echter Trainingsplan wurde.',
     name: 'Deniz',
     accent: 'pink',
   },
@@ -74,7 +74,7 @@ const testimonials = [
 ]
 
 function PricingPageContent() {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const searchParams = useSearchParams()
   const [loadingKey, setLoadingKey] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -152,7 +152,7 @@ function PricingPageContent() {
 
       window.location.href = payload.url
     } catch {
-      setMessage('Stripe ist noch nicht vollstaendig konfiguriert. Die UI ist aber vorbereitet.')
+      setMessage('Stripe ist noch nicht vollständig konfiguriert. Die UI ist aber vorbereitet.')
       setLoadingKey(null)
     }
   }
@@ -188,7 +188,7 @@ function PricingPageContent() {
               className="inline-flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500 transition-colors hover:text-white"
             >
               <ArrowLeft className="h-4 w-4" />
-              Zurueck
+              Zurück
             </Link>
           </div>
 
@@ -199,10 +199,10 @@ function PricingPageContent() {
           </div>
 
           <h1 className="font-public-display mt-6 text-4xl font-black uppercase tracking-tight md:text-6xl lg:text-7xl">
-            Waehle dein <span className="landing-neon-text">Level</span>
+            Wähle dein <span className="landing-neon-text">Level</span>
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-base font-medium text-slate-400 md:text-lg lg:text-xl">
-            Egal ob du gerade startest oder bereit fuer den naechsten grossen Sprung bist. Hier findest du den passenden Plan.
+            Egal ob du gerade startest oder bereit für den nächsten großen Sprung bist. Hier findest du den passenden Plan.
           </p>
         </section>
 
@@ -364,11 +364,11 @@ function PricingPageContent() {
                 disabled={loadingKey === 'membership'}
                 className="mt-8 flex w-full items-center justify-center rounded-[1.75rem] bg-white py-6 text-xl font-black text-[#0a0118] transition-transform hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loadingKey === 'membership' ? 'Weiterleiten...' : 'Zahlung bestaetigen'}
+                {loadingKey === 'membership' ? 'Weiterleiten...' : 'Zahlung bestätigen'}
               </button>
 
               <p className="mt-6 text-center text-[10px] uppercase tracking-widest text-slate-500">
-                SSL verschluesselt • DSGVO konform
+                SSL verschlüsselt • DSGVO konform
               </p>
             </div>
           </div>
@@ -409,7 +409,7 @@ function PricingPageContent() {
           <div className="mx-auto max-w-6xl overflow-hidden rounded-[2rem] bg-[linear-gradient(90deg,#ff00ff,#00f2ff,#ccff00)] p-8 text-center">
             <div className="rounded-[1.5rem] bg-black/45 px-4 py-10 backdrop-blur-md md:px-10 md:py-16">
               <div className="mb-4 inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-1">
-                <span className="text-xs font-bold uppercase tracking-widest text-[#ccff00]">Dein naechster Hebel</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-[#ccff00]">Dein nächster Hebel</span>
               </div>
               <h2 className="font-public-display text-4xl font-black uppercase tracking-tight md:text-6xl">
                 Build your

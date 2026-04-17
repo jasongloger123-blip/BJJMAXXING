@@ -42,9 +42,9 @@ export default function NameInputPage() {
         .eq('id', user.id)
         .maybeSingle()
 
-      // Wenn bereits Name und Archetyp vorhanden, direkt zur Startseite
+      // Wenn bereits Name und Archetyp vorhanden, weiter zum Gym-Onboarding (nicht Startseite!)
       if (profile?.full_name && profile?.primary_archetype) {
-        router.push('/')
+        router.push('/onboarding')
         return
       }
 

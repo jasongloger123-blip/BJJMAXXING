@@ -213,6 +213,76 @@ async function getSourceNodeMeta(
     clipRefsBySourceNodeId.set(nodeId, refs)
   })
 
+  // WICHTIG: Stelle sicher, dass Standing Node genau 29 Clips hat
+  const standingNodeIds = ['node-1-guard-identity', 'technique-c3934120']
+  const standingClipRefs = standingNodeIds.map(id => clipRefsBySourceNodeId.get(id)).filter(Boolean).flat() as { keys: string[]; clipId: string | null }[] | undefined
+  const standingHasEnoughClips = standingClipRefs && standingClipRefs.length >= 29
+  
+  // Lade Clips für Nodes ohne Assignments ODER Standing Node mit weniger als 29 Clips
+  const nodesNeedingClips = sourceNodeIds.filter((nodeId) => {
+    // Standing Node braucht immer 29 Clips
+    if (standingNodeIds.includes(nodeId)) {
+      const existingRefs = clipRefsBySourceNodeId.get(nodeId)
+      return !existingRefs || existingRefs.length < 29
+    }
+    // Andere Nodes nur wenn sie keine Assignments haben
+    return !clipRefsBySourceNodeId.has(nodeId)
+  })
+  
+  if (nodesNeedingClips.length > 0) {
+    console.log('Gameplan active: Loading clips from clip_archive for nodes:', nodesNeedingClips)
+    
+    const { data: allAvailableClips } = await admin
+      .from('clip_archive')
+      .select('id')
+      .neq('assignment_status', 'hidden')
+      .neq('assignment_status', 'archived')
+      .order('created_at', { ascending: false })
+      .limit(100)
+    
+    if (allAvailableClips && allAvailableClips.length > 0) {
+      const standingNodesNeedingClips = nodesNeedingClips.filter(id => standingNodeIds.includes(id))
+      const otherNodesNeedingClips = nodesNeedingClips.filter(id => !standingNodeIds.includes(id))
+      
+      // Standing Node braucht genau 29 Clips
+      for (const standingNodeId of standingNodesNeedingClips) {
+        // Berechne wie viele Clips noch fehlen
+        const existingRefs = clipRefsBySourceNodeId.get(standingNodeId) || []
+        const clipsNeeded = 29 - existingRefs.length
+        
+        if (clipsNeeded > 0) {
+          // Finde Clips die noch nicht zugewiesen sind
+          const existingClipIds = new Set(existingRefs.map(r => r.clipId).filter(Boolean))
+          const availableClips = allAvailableClips.filter(c => !existingClipIds.has(c.id))
+          const clipsToAdd = availableClips.slice(0, clipsNeeded)
+          
+          const newRefs = clipsToAdd.map((clip, index) => ({
+            keys: [`${standingNodeId}-video-${existingRefs.length + index}`],
+            clipId: clip.id,
+          }))
+          
+          clipRefsBySourceNodeId.set(standingNodeId, [...existingRefs, ...newRefs])
+          console.log(`Gameplan active: Standing node ${standingNodeId} now has ${existingRefs.length + newRefs.length} clips`)
+        }
+      }
+      
+      // Andere Nodes bekommen maximal 5 Clips
+      let clipIndex = 29
+      for (const nodeId of otherNodesNeedingClips) {
+        const clipsForNode = allAvailableClips.slice(clipIndex, clipIndex + 5)
+        clipIndex += 5
+        
+        if (clipsForNode.length > 0) {
+          const refs = clipsForNode.map((clip, index) => ({
+            keys: [`${nodeId}-video-${index}`],
+            clipId: clip.id,
+          }))
+          clipRefsBySourceNodeId.set(nodeId, refs)
+        }
+      }
+    }
+  }
+
   sourceNodeIds.forEach((sourceNodeId) => {
     if (clipRefsBySourceNodeId.has(sourceNodeId)) return
 
@@ -378,13 +448,17 @@ export async function GET(request: Request) {
       }
     }
 
+    // Versuche zuerst den default fallback Plan zu laden
+    let fallbackPlan: any = null
+    
     const initialFallback = await admin
       .from('gameplans')
       .select(PLAN_SELECT)
       .eq('status', 'published')
       .eq('is_fallback_default', true)
       .maybeSingle()
-    let fallbackPlan: any = initialFallback.data
+    
+    fallbackPlan = initialFallback.data
     let error: any = initialFallback.error
 
     if (error?.message?.includes("'hero_image_url'")) {
@@ -398,13 +472,28 @@ export async function GET(request: Request) {
       error = legacyFallback.error
     }
 
+    // Wenn kein default fallback existiert, versuche den seed-a-plan
+    if (!fallbackPlan) {
+      console.log('No default fallback plan, trying seed-a-plan...')
+      const seedPlan = await admin
+        .from('gameplans')
+        .select(PLAN_SELECT)
+        .eq('slug', 'seed-a-plan')
+        .eq('status', 'published')
+        .maybeSingle()
+      fallbackPlan = seedPlan.data
+      if (!seedPlan.error) error = null
+    }
+
     if (error) throw new Error(error.message)
 
     if (fallbackPlan) {
       const sourceNodeMetaById = await getSourceNodeMeta(admin, fallbackPlan, user?.id)
+      console.log('Returning fallback plan:', fallbackPlan.slug || fallbackPlan.id)
       return NextResponse.json({ plan: toResolvedGameplan(fallbackPlan, progressRows, 'assignment', sourceNodeMetaById) })
     }
 
+    console.log('No fallback plan found, returning empty fallback')
     return NextResponse.json({ plan: getFallbackGameplan(primaryArchetype) })
   } catch (error) {
     return NextResponse.json(

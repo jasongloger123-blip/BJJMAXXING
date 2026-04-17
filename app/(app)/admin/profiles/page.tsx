@@ -32,6 +32,7 @@ type ProfileWithStats = {
   validated_nodes: number
   total_progress: number
   training_events: number
+  techniques_learned_count: number
 }
 
 // Belt colors mapping
@@ -220,6 +221,15 @@ export default function AdminProfilesDashboardPage() {
             {profiles.filter((p) => hasSocialLinks(p)).length}
           </p>
         </div>
+        <div className="rounded-2xl border border-bjj-border bg-bjj-card p-4">
+          <div className="flex items-center gap-2 text-bjj-gold">
+            <Sparkles className="h-5 w-5" />
+            <span className="text-xs font-bold uppercase">Gelernte Clips</span>
+          </div>
+          <p className="mt-2 text-2xl font-black text-white">
+            {profiles.reduce((sum, p) => sum + (p.techniques_learned_count ?? 0), 0)}
+          </p>
+        </div>
       </div>
 
       {/* Filters */}
@@ -370,7 +380,7 @@ export default function AdminProfilesDashboardPage() {
                 </div>
 
                 {/* Quick Stats */}
-                <div className="mt-4 grid grid-cols-3 gap-2 border-t border-bjj-border pt-4">
+                <div className="mt-4 grid grid-cols-4 gap-2 border-t border-bjj-border pt-4">
                   <div className="text-center">
                     <p className="text-lg font-bold text-white">{profile.completed_nodes}</p>
                     <p className="text-[10px] uppercase text-bjj-muted">Completed</p>
@@ -382,6 +392,10 @@ export default function AdminProfilesDashboardPage() {
                   <div className="text-center">
                     <p className="text-lg font-bold text-white">{profile.training_events}</p>
                     <p className="text-[10px] uppercase text-bjj-muted">Trainings</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-bjj-gold">{profile.techniques_learned_count ?? 0}</p>
+                    <p className="text-[10px] uppercase text-bjj-muted">Gelernte Clips</p>
                   </div>
                 </div>
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
 
 export async function POST(request: Request) {
   const supabase = createClient()
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'E-Mail und Passwort sind erforderlich.' }, { status: 400 })
   }
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   })
@@ -30,5 +31,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 400 })
   }
 
-  return NextResponse.json({ ok: true })
+  // Manually set the auth cookie that @supabase/ssr expects
+  // The cookie name format is: sb-{project-ref}-auth-token
+  const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1]
+  if (data.session && projectRef) {
+    const cookieStore = cookies()
+    const cookieName = `sb-${projectRef}-auth-token`
+    const cookieValue = JSON.stringify({
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+    })
+    
+    cookieStore.set(cookieName, cookieValue, {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      sameSite: 'lax',
+      secure: false, // Must be false for localhost/cross-browser compatibility
+      httpOnly: false, // Allow JavaScript to read the cookie for client-side auth
+    })
+    
+    console.log('Login: Set auth cookie', { cookieName, userId: data.user?.id })
+  }
+
+  return NextResponse.json({ ok: true, user: data.user ? { id: data.user.id, email: data.user.email } : null })
 }

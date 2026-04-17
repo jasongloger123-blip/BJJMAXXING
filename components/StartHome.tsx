@@ -29,6 +29,7 @@ type StartState = {
   gymLocation: string | null
   gymSource: string | null
   gymUnlistedName: string | null
+  techniquesLearnedCount: number
 }
 
 type ClipReply = {
@@ -83,6 +84,12 @@ type ProgressRow = {
 type QueueTransitionPhase = 'idle' | 'out' | 'prepare'
 
 const GAMEPLAN_UNLOCK_EVENT_KEY = 'bjjmaxxing:pending-gameplan-unlock'
+
+// WICHTIG: Module-level Refs die zwischen Renders persistieren
+// Diese verhindern das Verschwinden von Clips während State-Updates
+const moduleQueueRef = { current: null as QueueCard[] | null }
+const moduleDisplayCardRef = { current: null as QueueCard | null }
+const moduleResolvedClipRef = { current: null as ClipPreview | null }
 
 function extractYoutubeId(url: string) {
   const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/)
@@ -162,7 +169,7 @@ function isMissingColumnError(error: { message?: string } | null, column: string
 
 async function loadUserProfileSafe(supabase: ReturnType<typeof createClient>, userId: string) {
   const attempts = [
-    'username, full_name, email, avatar_url, primary_archetype, gym_name, gym_place_id, gym_location, gym_source, gym_unlisted_name',
+    'username, full_name, email, avatar_url, primary_archetype, gym_name, gym_place_id, gym_location, gym_source, gym_unlisted_name, techniques_learned_count',
     'username, full_name, email, avatar_url, primary_archetype',
     'full_name, email, avatar_url, primary_archetype',
   ]
@@ -178,6 +185,7 @@ async function loadUserProfileSafe(supabase: ReturnType<typeof createClient>, us
           gym_location: null,
           gym_source: null,
           gym_unlisted_name: null,
+          techniques_learned_count: 0,
           ...(result.data ?? {}),
         },
         error: null,
@@ -220,31 +228,44 @@ function shouldReplaceDisplayedCard(displayCard: QueueCard, primaryCard: QueueCa
   )
 }
 
-function mergeQueueCards(serverQueue: QueueCard[] | null, localQueue: QueueCard[]) {
+function mergeQueueCards(
+  serverQueue: QueueCard[] | null,
+  localQueue: QueueCard[],
+  previousQueue: QueueCard[] | null
+): QueueCard[] {
+  // Merge server and local queues
+  let merged: QueueCard[]
+
+  if (!serverQueue?.length && !localQueue.length) {
+    // Both empty - keep previous queue if available to prevent flickering
+    return previousQueue ?? []
+  }
+
   if (!serverQueue?.length) {
-    return localQueue
+    merged = localQueue
+  } else if (!localQueue.length) {
+    merged = serverQueue
+  } else {
+    // Both have data - do proper merge
+    const serverById = new Map(serverQueue.map((card) => [card.id, card]))
+    merged = localQueue.map((localCard) => {
+      const serverCard = serverById.get(localCard.id)
+      if (!serverCard) {
+        return localCard
+      }
+
+      return {
+        ...localCard,
+        clipTitle: serverCard.clipTitle || localCard.clipTitle,
+        clipDescription: serverCard.clipDescription ?? localCard.clipDescription,
+        clipHashtags: serverCard.clipHashtags ?? localCard.clipHashtags,
+        clipUrl: serverCard.clipUrl || localCard.clipUrl,
+        clipSource: serverCard.clipUrl ? serverCard.clipSource : localCard.clipSource,
+      }
+    })
   }
 
-  if (!localQueue.length) {
-    return serverQueue
-  }
-
-  const serverById = new Map(serverQueue.map((card) => [card.id, card]))
-  return localQueue.map((localCard) => {
-    const serverCard = serverById.get(localCard.id)
-    if (!serverCard) {
-      return localCard
-    }
-
-    return {
-      ...localCard,
-      clipTitle: serverCard.clipTitle || localCard.clipTitle,
-      clipDescription: serverCard.clipDescription ?? localCard.clipDescription,
-      clipHashtags: serverCard.clipHashtags ?? localCard.clipHashtags,
-      clipUrl: serverCard.clipUrl || localCard.clipUrl,
-      clipSource: serverCard.clipUrl ? serverCard.clipSource : localCard.clipSource,
-    }
-  })
+  return merged
 }
 
 function rotateQueueCards(cards: QueueCard[], startIndex: number) {
@@ -326,12 +347,31 @@ export default function StartHome() {
   } | null>(null)
   const [validationFeedback, setValidationFeedback] = useState<string | null>(null)
   const [displayCard, setDisplayCard] = useState<QueueCard | null>(null)
+
+  // WICHTIG: Sichere Wrapper-Funktion die verhindert, dass wir zu einer Card ohne clipUrl wechseln
+  const setDisplayCardSafe = useCallback((card: QueueCard | null) => {
+    if (!card) {
+      setDisplayCard(null)
+      return
+    }
+    // Wenn neue Card keine clipUrl hat aber wir hatten schon eine mit clipUrl -> behalte alte
+    if (!card.clipUrl && moduleDisplayCardRef.current?.clipUrl) {
+      console.log('[DEBUG] Prevented setDisplayCard to card without clipUrl:', {
+        newCardId: card.id,
+        oldCardId: moduleDisplayCardRef.current.id,
+      })
+      return
+    }
+    // Speichere in Ref für zukünftige Prüfungen
+    moduleDisplayCardRef.current = card
+    setDisplayCard(card)
+  }, [])
   const [transitionPhase, setTransitionPhase] = useState<QueueTransitionPhase>('idle')
   const [isFlying, setIsFlying] = useState(false)
   const [isShaking, setIsShaking] = useState(false)
   const [barPulseActive, setBarPulseActive] = useState(false)
   const [progressCountFlash, setProgressCountFlash] = useState(false)
-  const [debugQueueMode, setDebugQueueMode] = useState<'normal' | 'new'>('normal')
+  const [debugQueueMode, setDebugQueueMode] = useState<'normal' | 'new'>('new')
   const [flyingVideoStyle, setFlyingVideoStyle] = useState<CSSProperties | null>(null)
   const [isSavedClip, setIsSavedClip] = useState(false)
   const [isLoadingSaved, setIsLoadingSaved] = useState(false)
@@ -339,11 +379,16 @@ export default function StartHome() {
   const [playbackRate, setPlaybackRate] = useState(1)
   const [profileLoaded, setProfileLoaded] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const videoShellRef = useRef<HTMLDivElement | null>(null)
   const progressBarRef = useRef<HTMLDivElement | null>(null)
   const swapTimerRef = useRef<number | null>(null)
   const settleTimerRef = useRef<number | null>(null)
   const hasInitializedDisplayCardRef = useRef(false)
+  // WICHTIG: Merke, ob Onboarding schonmal abgeschlossen wurde - verhindert Flackern!
+  const hasCompletedOnboardingRef = useRef(false)
+  // DEBUG: Track visibleCard changes
+  const prevVisibleCardRef = useRef<string | null>(null)
   const unlockSnapshotRef = useRef<{
     currentNodeId: string | null
     currentSourceNodeId: string | null
@@ -351,136 +396,159 @@ export default function StartHome() {
     progressCompletedRules: number
     progressTotalRules: number
   } | null>(null)
+  
+  // Flags to prevent multiple loads
+  const hasLoadedStateRef = useRef(false)
+  const hasLoadedQueueRef = useRef(false)
 
   const loadState = useCallback(async () => {
-    const user = await waitForAuthenticatedUser(supabase)
-    if (!user) {
-      router.push('/login')
-      return
-    }
+    try {
+      const user = await waitForAuthenticatedUser(supabase)
+      if (!user) {
+        router.push('/login')
+        return
+      }
 
-    // Set initial state immediately with user data to show content faster
-    setStartState({
-      userId: user.id,
-      username: user.user_metadata?.username ?? null,
-      fullName: user.user_metadata?.full_name ?? null,
-      email: user.email ?? null,
-      avatarUrl: user.user_metadata?.avatar_url ?? null,
-      primaryArchetype: null,
-      gymName: null,
-      gymPlaceId: null,
-      gymLocation: null,
-      gymSource: null,
-      gymUnlistedName: null,
-    })
-    // Show content immediately - don't wait for profile
-    setLoading(false)
-
-    // Load profile and progress in parallel (don't block UI)
-    Promise.all([
-      loadUserProfileSafe(supabase, user.id),
-      (async () => {
-        const result = await supabase.from('progress').select('node_id, completed, validated').eq('user_id', user.id)
-        if (!isMissingColumnError(result.error, 'validated')) return result
-        const fallback = await supabase.from('progress').select('node_id, completed').eq('user_id', user.id)
-        return {
-          data: (fallback.data ?? []).map((entry) => ({ ...entry, validated: false })),
-          error: fallback.error,
-        }
-      })(),
-      supabase.from('training_clip_events').select('node_id, clip_key, clip_type, result, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
-    ]).then(([profileResult, progressResult, eventsResult]) => {
-      const profile = profileResult.data as any
-
-      // Update state with full data
+      // Set initial state immediately with user data to show content faster
       setStartState({
         userId: user.id,
-        username: profile?.username ?? user.user_metadata?.username ?? null,
-        fullName: profile?.full_name ?? user.user_metadata?.full_name ?? null,
-        email: profile?.email ?? user.email ?? null,
-        avatarUrl: profile?.avatar_url ?? user.user_metadata?.avatar_url ?? null,
-        primaryArchetype: profile?.primary_archetype ?? null,
-        gymName: profile?.gym_name ?? null,
-        gymPlaceId: profile?.gym_place_id ?? null,
-        gymLocation: profile?.gym_location ?? null,
-        gymSource: profile?.gym_source ?? null,
-        gymUnlistedName: profile?.gym_unlisted_name ?? null,
+        username: user.user_metadata?.username ?? null,
+        fullName: user.user_metadata?.full_name ?? null,
+        email: user.email ?? null,
+        avatarUrl: user.user_metadata?.avatar_url ?? null,
+        primaryArchetype: null,
+        gymName: null,
+        gymPlaceId: null,
+        gymLocation: null,
+        gymSource: null,
+        gymUnlistedName: null,
+        techniquesLearnedCount: 0,
       })
-      setUsernameDraft(profile?.username ?? '')
-      
-      // Check admin status
-      setIsAdmin(isAdminEmail(profile?.email ?? user.email))
-      const progressRows = (progressResult.data ?? []) as ProgressRow[]
-      setCompletedIds(progressRows.filter((entry) => entry.completed).map((entry) => entry.node_id))
-      setValidatedIds(progressRows.filter((entry) => entry.validated).map((entry) => entry.node_id))
-      setEvents((eventsResult.data ?? []) as QueueEvent[])
-      setProfileLoaded(true)
-      window.dispatchEvent(new Event('profile-ready-changed'))
-    })
+      // Show content immediately - don't wait for profile
+      setLoading(false)
+
+      // Load profile and progress in parallel (don't block UI)
+      Promise.all([
+        loadUserProfileSafe(supabase, user.id),
+        (async () => {
+          const result = await supabase.from('progress').select('node_id, completed, validated').eq('user_id', user.id)
+          if (!isMissingColumnError(result.error, 'validated')) return result
+          const fallback = await supabase.from('progress').select('node_id, completed').eq('user_id', user.id)
+          return {
+            data: (fallback.data ?? []).map((entry) => ({ ...entry, validated: false })),
+            error: fallback.error,
+          }
+        })(),
+        supabase.from('training_clip_events').select('node_id, clip_key, clip_type, result, created_at').eq('user_id', user.id).order('created_at', { ascending: false }),
+      ]).then(([profileResult, progressResult, eventsResult]) => {
+        const profile = profileResult.data as any
+
+        // Update state with full data
+        setStartState({
+          userId: user.id,
+          username: profile?.username ?? user.user_metadata?.username ?? null,
+          fullName: profile?.full_name ?? user.user_metadata?.full_name ?? null,
+          email: profile?.email ?? user.email ?? null,
+          avatarUrl: profile?.avatar_url ?? user.user_metadata?.avatar_url ?? null,
+          primaryArchetype: profile?.primary_archetype ?? null,
+          gymName: profile?.gym_name ?? null,
+          gymPlaceId: profile?.gym_place_id ?? null,
+          gymLocation: profile?.gym_location ?? null,
+          gymSource: profile?.gym_source ?? null,
+          gymUnlistedName: profile?.gym_unlisted_name ?? null,
+          techniquesLearnedCount: profile?.techniques_learned_count ?? 0,
+        })
+        setUsernameDraft(profile?.username ?? '')
+
+        // Check admin status
+        setIsAdmin(isAdminEmail(profile?.email ?? user.email))
+        const progressRows = (progressResult.data ?? []) as ProgressRow[]
+        setCompletedIds(progressRows.filter((entry) => entry.completed).map((entry) => entry.node_id))
+        setValidatedIds(progressRows.filter((entry) => entry.validated).map((entry) => entry.node_id))
+        setEvents((eventsResult.data ?? []) as QueueEvent[])
+        setProfileLoaded(true)
+        window.dispatchEvent(new Event('profile-ready-changed'))
+      }).catch((err) => {
+        console.error('StartHome: Error loading profile data:', err)
+        setProfileLoaded(true) // Allow UI to render with basic user data
+      })
+    } catch (err) {
+      console.error('StartHome: Error in loadState:', err)
+      setLoadError('Fehler beim Laden der Benutzerdaten')
+      setLoading(false)
+    }
   }, [router, supabase])
 
   const loadServerQueue = useCallback(async () => {
     try {
-      // Try to get session from Supabase client (works in normal browser)
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      // Also try to manually read auth cookie from document (for cross-browser compatibility)
-      const getCookie = (name: string) => {
-        if (typeof document === 'undefined') return null
-        const value = `; ${document.cookie}`
-        const parts = value.split(`; ${name}=`)
-        if (parts.length === 2) return parts.pop()?.split(';').shift() || null
-        return null
-      }
-      
-      // Try to find Supabase auth cookie
-      const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1]
-      const cookieName = `sb-${projectRef}-auth-token`
-      const authCookie = getCookie(cookieName)
-      
-      console.log('StartHome: Auth check:', { 
-        hasSession: !!session, 
-        hasCookie: !!authCookie,
-        cookieName,
-        userId: session?.user?.id 
-      })
-      
-      const headers: Record<string, string> = {}
-      
-      // Prefer Authorization header from session
-      if (session?.access_token) {
-        headers.Authorization = `Bearer ${session.access_token}`
-        console.log('StartHome: Using session token')
-      } else if (authCookie) {
-        // Try to parse cookie and extract token
-        try {
-          const parsedCookie = JSON.parse(decodeURIComponent(authCookie))
-          const token = typeof parsedCookie === 'string' ? parsedCookie : parsedCookie.access_token
-          if (token) {
-            headers.Authorization = `Bearer ${token}`
-            console.log('StartHome: Using cookie token')
-          }
-        } catch (e) {
-          console.log('StartHome: Failed to parse auth cookie')
+      // Try multiple auth sources for maximum compatibility
+      let token: string | null = null
+      let authSource = 'none'
+
+      // Source 1: Supabase session (works in normal browsers)
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.access_token) {
+          token = session.access_token
+          authSource = 'supabase-session'
         }
-      } else {
-        console.log('StartHome: No auth available - requesting as guest')
+      } catch {}
+
+      // Source 2: Cookie (cross-browser compatibility)
+      if (!token) {
+        const getCookie = (name: string) => {
+          if (typeof document === 'undefined') return null
+          const value = `; ${document.cookie}`
+          const parts = value.split(`; ${name}=`)
+          if (parts.length === 2) return parts.pop()?.split(';').shift() || null
+          return null
+        }
+
+        const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.match(/https:\/\/([^.]+)/)?.[1]
+        const cookieName = `sb-${projectRef}-auth-token`
+        const authCookie = getCookie(cookieName)
+
+        if (authCookie) {
+          try {
+            const parsedCookie = JSON.parse(decodeURIComponent(authCookie))
+            token = typeof parsedCookie === 'string' ? parsedCookie : parsedCookie.access_token
+            if (token) authSource = 'cookie'
+          } catch {}
+        }
       }
 
-      const response = await fetch('/api/start-queue', { 
-        cache: 'no-store', 
+      // Source 3: localStorage (fallback for cross-browser issues)
+      if (!token && typeof window !== 'undefined') {
+        try {
+          const lsToken = localStorage.getItem('sb-auth-token')
+          if (lsToken) {
+            const parsed = JSON.parse(lsToken)
+            token = parsed.access_token || null
+            if (token) authSource = 'localStorage'
+          }
+        } catch {}
+      }
+
+      console.log('StartHome: Auth check:', { hasToken: !!token, source: authSource })
+
+      const headers: Record<string, string> = {}
+      if (token) {
+        headers.Authorization = `Bearer ${token}`
+      }
+
+      const response = await fetch('/api/start-queue', {
+        cache: 'no-store',
         headers,
-        credentials: 'include' // Always include cookies
+        credentials: 'include'
       })
-      
-      console.log('StartHome: API response status:', response.status)
-      
-      // Set loading false immediately after first response
+
+      console.log('StartHome: API response:', response.status, authSource)
+
       setLoading(false)
-      
+
       const payload = (await response.json()) as { queue?: QueueCard[] }
       console.log('StartHome: Queue loaded:', { queueLength: payload.queue?.length ?? 0 })
-      
+
       if (!response.ok) {
         setServerQueue(null)
         return
@@ -494,12 +562,16 @@ export default function StartHome() {
   }, [supabase])
 
   useEffect(() => {
+    if (hasLoadedStateRef.current) return
+    hasLoadedStateRef.current = true
     void loadState()
-  }, [loadState])
+  }, [])
 
   useEffect(() => {
+    if (hasLoadedQueueRef.current) return
+    hasLoadedQueueRef.current = true
     void loadServerQueue()
-  }, [loadServerQueue])
+  }, [])
 
   const loadActivePlan = useCallback(async () => {
     try {
@@ -548,13 +620,20 @@ export default function StartHome() {
     }
   }, [supabase])
 
-  useEffect(() => {
-    void loadActivePlan()
-  }, [loadActivePlan])
+  const hasLoadedActivePlanRef = useRef(false)
+  const hasLoadedAvailablePlansRef = useRef(false)
 
   useEffect(() => {
+    if (hasLoadedActivePlanRef.current) return
+    hasLoadedActivePlanRef.current = true
+    void loadActivePlan()
+  }, [])
+
+  useEffect(() => {
+    if (hasLoadedAvailablePlansRef.current) return
+    hasLoadedAvailablePlansRef.current = true
     void loadAvailablePlans()
-  }, [loadAvailablePlans])
+  }, [])
 
   const loadingClipArchiveRef = useRef<Set<string>>(new Set())
   const loadedClipArchiveRef = useRef<Set<string>>(new Set())
@@ -770,12 +849,12 @@ export default function StartHome() {
 
           if (clipRefs.length === 0) {
             const catalogEntry = getTechniqueCatalogEntryForPlanNode(node)
-            ;(catalogEntry?.videos ?? []).forEach((video) => pushClipRef({ url: video.url }))
+              ; (catalogEntry?.videos ?? []).forEach((video) => pushClipRef({ url: video.url }))
           }
 
           if (clipRefs.length === 0) {
             const fallbackNode = getNodeById(sourceNodeId)
-            ;(fallbackNode?.videos ?? []).forEach((video) => pushClipRef({ url: video.url }))
+              ; (fallbackNode?.videos ?? []).forEach((video) => pushClipRef({ url: video.url }))
           }
 
           const progress = calculateClipProgressForNode({
@@ -863,8 +942,21 @@ export default function StartHome() {
   }, [activePlan, clipProgressByNodeId])
 
   const queue = useMemo(() => {
-    // Convert clipArchiveVideos to QueueClipGroups format for buildStartQueue
-    const clipGroupsByNodeId: Record<string, { main_reference: { id: string; title: string; url: string; role: 'main_reference'; displayOrder: number }[] }> = {}
+    // WICHTIG: Verwende serverQueue DIREKT wenn sie gültige Daten hat
+    // Die API liefert bereits Clips mit allen nötigen Informationen
+    if (serverQueue && serverQueue.length > 0) {
+      // Speichere in moduleQueueRef für Stabilität
+      moduleQueueRef.current = serverQueue
+      console.log('[DEBUG] Using serverQueue directly:', {
+        queueLength: serverQueue.length,
+        firstCardTitle: serverQueue[0]?.clipTitle,
+      })
+      return rotateQueueCards(serverQueue, getLatestLocalQueueIndex(serverQueue, events))
+    }
+    
+    // Fallback: Nur wenn serverQueue leer ist, baue lokale Queue
+    const clipGroupsByNodeId: Record<string, { main_reference: { id: string; title: string; url: string; role: 'main_reference'; displayOrder: number; description?: string | null; hashtags?: string[] }[] }> = {}
+    
     for (const [nodeId, videos] of Object.entries(clipArchiveVideos)) {
       clipGroupsByNodeId[nodeId] = {
         main_reference: videos.map((video, index) => ({
@@ -879,13 +971,72 @@ export default function StartHome() {
       }
     }
 
-    // Always build local queue with loaded clips
     const localQueue = buildStartQueue(completedIds, events, effectiveActivePlan, clipGroupsByNodeId)
-
-    const mergedQueue = mergeQueueCards(serverQueue, localQueue)
-    return rotateQueueCards(mergedQueue, getLatestLocalQueueIndex(mergedQueue, events))
+    
+    // WICHTIG: Verhindere leere Queue
+    if (localQueue.length === 0 && moduleQueueRef.current && moduleQueueRef.current.length > 0) {
+      console.log('[DEBUG] Keeping previous queue (local empty):', {
+        previousLength: moduleQueueRef.current.length,
+      })
+      return rotateQueueCards(moduleQueueRef.current, getLatestLocalQueueIndex(moduleQueueRef.current, events))
+    }
+    
+    // Speichere nicht-leere Queue
+    if (localQueue.length > 0) {
+      moduleQueueRef.current = localQueue
+    }
+    
+    return rotateQueueCards(localQueue, getLatestLocalQueueIndex(localQueue, events))
   }, [completedIds, effectiveActivePlan, events, serverQueue, clipArchiveVideos])
+  // DEBUG
+  if (queue.length === 0 && moduleQueueRef.current && moduleQueueRef.current.length > 0) {
+    console.log('[DEBUG] Queue empty but previousQueue exists!', {
+      previousQueueLength: moduleQueueRef.current.length,
+      previousQueueFirstCard: moduleQueueRef.current[0]?.id,
+    })
+  }
+  
   const primaryCard = queue[0]
+  const topFiveCards = queue.slice(0, 29)
+
+  // Resolve clips for top 5 cards
+  const topFiveCardsWithClips = useMemo(() => {
+    return topFiveCards.map((card) => {
+      if (card.clipUrl) {
+        return {
+          ...card,
+          resolvedClip: {
+            id: card.videoKey,
+            title: card.clipTitle,
+            url: card.clipUrl,
+            thumbnailUrl: getClipPreviewImage(card.clipUrl),
+          }
+        }
+      }
+
+      // Try to find clip from clipArchiveVideos
+      const node = Object.values(effectiveActivePlan?.nodes ?? {}).find((n) =>
+        (n.sourceNodeId ?? n.id) === card.nodeId || n.id === card.nodeId
+      )
+      const sourceId = node?.sourceNodeId ?? node?.id ?? card.nodeId
+      const assignedVideo = clipArchiveVideos[sourceId]?.[card.videoIndex]
+
+      if (assignedVideo?.url) {
+        return {
+          ...card,
+          resolvedClip: {
+            id: assignedVideo.id,
+            title: assignedVideo.title,
+            url: assignedVideo.url,
+            thumbnailUrl: assignedVideo.thumbnailUrl,
+          }
+        }
+      }
+
+      return { ...card, resolvedClip: null }
+    })
+  }, [topFiveCards, clipArchiveVideos, effectiveActivePlan])
+
   const hasGym = Boolean(startState?.gymPlaceId ?? startState?.gymName ?? startState?.gymUnlistedName)
   const displayName = startState?.username ?? startState?.fullName ?? startState?.email?.split('@')[0] ?? 'BJJ Athlete'
   const coachInitials = displayName
@@ -904,12 +1055,73 @@ export default function StartHome() {
     const total = Math.max(flowSteps.length, 1)
     return Math.max(18, Math.min(100, Math.round((baseline / total) * 100)))
   }, [completedIds.length, validatedIds.length])
-  const visibleCard = displayCard ?? primaryCard ?? null
+  // WICHTIG: Verhindere Wechsel zu Card ohne validen Clip
+  // Wenn neue primaryCard keine clipUrl hat, behalte alte primaryCard bei
+  const stablePrimaryCard = useMemo(() => {
+    if (!primaryCard) {
+      return moduleDisplayCardRef.current
+    }
+    // Wenn neue Card keine clipUrl hat aber wir hatten schon eine mit clipUrl -> behalte alte
+    if (!primaryCard.clipUrl && moduleDisplayCardRef.current?.clipUrl) {
+      console.log('[DEBUG] Prevented switch to primaryCard without clipUrl:', {
+        newCardId: primaryCard.id,
+        oldCardId: moduleDisplayCardRef.current.id,
+      })
+      return moduleDisplayCardRef.current
+    }
+    // Neue Card hat gültige Daten -> aktualisiere stored reference
+    moduleDisplayCardRef.current = primaryCard
+    return primaryCard
+  }, [primaryCard])
+
+  // WICHTIG: Auch displayCard darf nicht ohne clipUrl verwendet werden
+  const stableDisplayCard = useMemo(() => {
+    if (!displayCard) {
+      return null
+    }
+    // Wenn displayCard keine clipUrl hat aber wir hatten schon eine mit clipUrl -> behalte alte
+    if (!displayCard.clipUrl && moduleDisplayCardRef.current?.clipUrl) {
+      console.log('[DEBUG] Prevented switch to displayCard without clipUrl:', {
+        newCardId: displayCard.id,
+        oldCardId: moduleDisplayCardRef.current.id,
+      })
+      return moduleDisplayCardRef.current
+    }
+    return displayCard
+  }, [displayCard])
+
+  const visibleCard = stableDisplayCard ?? stablePrimaryCard ?? null
+  
+  // DEBUG: Log changes
+  if (visibleCard) {
+    const currentId = visibleCard.id
+    if (prevVisibleCardRef.current !== currentId) {
+      console.log('[DEBUG] visibleCard CHANGED:', {
+        id: visibleCard.id,
+        clipUrl: visibleCard.clipUrl?.slice(0, 50) || 'EMPTY',
+        hasClipUrl: !!visibleCard.clipUrl,
+        isLoadingClipsForNode: loadingClipArchiveForNodes.has(visibleCard.nodeId),
+        queueLength: queue.length,
+        primaryCardId: primaryCard?.id,
+        displayCardId: displayCard?.id,
+      })
+      prevVisibleCardRef.current = currentId
+    }
+  } else {
+    console.log('[DEBUG] visibleCard is NULL:', {
+      displayCard: displayCard?.id,
+      primaryCard: primaryCard?.id,
+      stableDisplayCard: moduleDisplayCardRef.current?.id,
+      queueLength: queue.length,
+    })
+  }
+  
   const activePlanNode = useMemo(() => {
     const currentNodeId = effectiveActivePlan?.unlockSummary.currentNodeId
     if (!currentNodeId) return null
     return effectiveActivePlan?.nodes[currentNodeId] ?? null
   }, [effectiveActivePlan])
+  
   const visibleCardResolvedClip = useMemo<ClipPreview | null>(() => {
     if (!visibleCard) {
       return null
@@ -964,6 +1176,11 @@ export default function StartHome() {
       }
     }
 
+    // WICHTIG: Wenn Clips noch laden, behalte vorherigen Clip bei!
+    if (isLoadingClips && moduleResolvedClipRef.current?.url) {
+      return moduleResolvedClipRef.current
+    }
+
     // If clips are still loading, don't show fallback yet
     if (isLoadingClips) {
       return null
@@ -974,20 +1191,20 @@ export default function StartHome() {
     const fallbackVideo =
       entry?.videos?.[0]
         ? {
-            id: `${sourceId}-video-0`,
-            title: entry.videos[0].title,
-            url: entry.videos[0].url,
-            thumbnailUrl: getClipPreviewImage(entry.videos[0].url),
-            videoKey: `${sourceId}-video-0`,
-          }
+          id: `${sourceId}-video-0`,
+          title: entry.videos[0].title,
+          url: entry.videos[0].url,
+          thumbnailUrl: getClipPreviewImage(entry.videos[0].url),
+          videoKey: `${sourceId}-video-0`,
+        }
         : fallbackNode?.videos?.[0]
           ? {
-              id: `${sourceId}-video-0`,
-              title: fallbackNode.videos[0].title,
-              url: fallbackNode.videos[0].url,
-              thumbnailUrl: getClipPreviewImage(fallbackNode.videos[0].url),
-              videoKey: `${sourceId}-video-0`,
-            }
+            id: `${sourceId}-video-0`,
+            title: fallbackNode.videos[0].title,
+            url: fallbackNode.videos[0].url,
+            thumbnailUrl: getClipPreviewImage(fallbackNode.videos[0].url),
+            videoKey: `${sourceId}-video-0`,
+          }
           : null
 
     if (!fallbackVideo?.url) {
@@ -997,8 +1214,13 @@ export default function StartHome() {
     return {
       ...fallbackVideo,
       usesAssignedClip: false,
-      }
+    }
   }, [effectiveActivePlan, clipArchiveVideos, queue, visibleCard, loadingClipArchiveForNodes])
+  
+  // Speichere resolved Clip für nächsten Render
+  if (visibleCardResolvedClip?.url) {
+    moduleResolvedClipRef.current = visibleCardResolvedClip
+  }
   const activeClipTitle = visibleCardResolvedClip?.title ?? visibleCard?.clipTitle ?? ''
   const activeSavedClipId = visibleCardResolvedClip
     ? visibleCard?.clipId ?? (visibleCardResolvedClip.usesAssignedClip ? visibleCardResolvedClip.id : null)
@@ -1047,28 +1269,43 @@ export default function StartHome() {
       ? queueCardsForSameNode
       : currentTechniqueVideos.length > 1
         ? currentTechniqueVideos.map((video, index): QueueCard => {
-            const videoKeys = currentTechniqueVideos.map((v) => v.videoKey)
-            return {
-              ...visibleCard,
-              id: videoKeys[index],
-              videoKey: videoKeys[index],
-              videoKeys,
-              coreVideoKeys: visibleCard.coreVideoKeys ?? videoKeys,
-              clipId: video.id,
-              videoIndex: index,
-              totalVideos: currentTechniqueVideos.length,
-              clipTitle: video.title,
-              clipDescription: video.description ?? visibleCard.clipDescription,
-              clipHashtags: video.hashtags ?? visibleCard.clipHashtags,
-              clipUrl: video.url,
-              clipSource: getClipSourceFromUrl(video.url),
-            }
-          })
+          const videoKeys = currentTechniqueVideos.map((v) => v.videoKey)
+          return {
+            ...visibleCard,
+            id: videoKeys[index],
+            videoKey: videoKeys[index],
+            videoKeys,
+            coreVideoKeys: visibleCard.coreVideoKeys ?? videoKeys,
+            clipId: video.id,
+            videoIndex: index,
+            totalVideos: currentTechniqueVideos.length,
+            clipTitle: video.title,
+            clipDescription: video.description ?? visibleCard.clipDescription,
+            clipHashtags: video.hashtags ?? visibleCard.clipHashtags,
+            clipUrl: video.url,
+            clipSource: getClipSourceFromUrl(video.url),
+          }
+        })
         : []
 
     return currentTechniqueCards
   }, [currentTechniqueVideos, queue, visibleCard])
   const currentTechniqueProgress = useMemo(() => {
+    // WICHTIG: Verwende den ERSTEN Node aus dem Plan (Standing), nicht den current Node
+    const firstNodeId = activePlan?.mainPath?.[0]
+    const firstNode = firstNodeId ? activePlan?.nodes?.[firstNodeId] : null
+    
+    // Wenn der erste Node (Standing) einen progressTotalRules Wert hat, verwende diesen
+    if (firstNode?.progressTotalRules && firstNode.progressTotalRules > 0) {
+      const completed = firstNode.progressCompletedRules ?? 0
+      const total = firstNode.progressTotalRules
+      return {
+        completed: Math.min(total, completed),
+        total,
+        percent: Math.max(0, Math.min(100, Math.round((completed / total) * 100))),
+      }
+    }
+
     if (!activePlanNode && !visibleCard) {
       return { completed: 0, total: 0, percent: 0 }
     }
@@ -1133,7 +1370,7 @@ export default function StartHome() {
       total,
       percent: total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0,
     }
-  }, [effectiveActivePlan?.nodes, activePlanNode, clipArchiveVideos, clipProgressByNodeId, currentTechniqueVideos, events, visibleCard])
+  }, [activePlan, effectiveActivePlan?.nodes, activePlanNode, clipArchiveVideos, clipProgressByNodeId, currentTechniqueVideos, events, visibleCard])
 
   function hasProgressCreditForCard(card: QueueCard) {
     if (card.progressCreditEarned) return true
@@ -1263,7 +1500,7 @@ export default function StartHome() {
     }
 
     userSelectedCardRef.current = nextCard.id
-    setDisplayCard(nextCard)
+    setDisplayCardSafe(nextCard)
     setTransitionPhase('idle')
   }
 
@@ -1276,7 +1513,7 @@ export default function StartHome() {
     }
 
     userSelectedCardRef.current = nextCard.id
-    setDisplayCard(nextCard)
+    setDisplayCardSafe(nextCard)
     setTransitionPhase('idle')
   }, [debugQueueMode, displayCard?.id, displayCard?.videoKey, effectiveActivePlan?.nodes, events, queue])
 
@@ -1290,23 +1527,44 @@ export default function StartHome() {
       settleTimerRef.current = null
     }
 
+    // WICHTIG: Wenn primaryCard kurzzeitig null ist (z.B. während Neu-Berechnung),
+    // NICHT die displayCard zurücksetzen! Das verhindert das Verschwinden von Clips.
     if (!primaryCard) {
-      setDisplayCard(null)
-      hasInitializedDisplayCardRef.current = false
-      userSelectedCardRef.current = null
+      // Nur zurücksetzen wenn wir wirklich keine Daten haben (nicht nur temporär)
+      // und es gibt auch keine vorherige moduleDisplayCard
+      if (!moduleDisplayCardRef.current && !displayCard) {
+        hasInitializedDisplayCardRef.current = false
+        userSelectedCardRef.current = null
+      }
       return
+    }
+
+    // WICHTIG: Nur speichern wenn primaryCard gültige Daten hat
+    // Wenn neue Card keine clipUrl hat, speichere sie NICHT in moduleDisplayCardRef
+    if (primaryCard.clipUrl) {
+      moduleDisplayCardRef.current = primaryCard
+    } else if (!moduleDisplayCardRef.current) {
+      // Erstmalig laden - speichere auch ohne clipUrl
+      moduleDisplayCardRef.current = primaryCard
+    } else {
+      console.log('[DEBUG] Skipping update to primaryCard without clipUrl:', {
+        cardId: primaryCard.id,
+        hasClipUrl: !!primaryCard.clipUrl,
+        storedCardId: moduleDisplayCardRef.current.id,
+        storedHasClipUrl: !!moduleDisplayCardRef.current.clipUrl,
+      })
     }
 
     if (!hasInitializedDisplayCardRef.current || !displayCard) {
       hasInitializedDisplayCardRef.current = true
-      setDisplayCard(primaryCard)
+      setDisplayCardSafe(primaryCard)
       setTransitionPhase('idle')
       return
     }
 
     if (displayCard.id === primaryCard.id) {
       if (shouldReplaceDisplayedCard(displayCard, primaryCard)) {
-        setDisplayCard(primaryCard)
+        setDisplayCardSafe(primaryCard)
       }
       if (transitionPhase !== 'idle') {
         setTransitionPhase('idle')
@@ -1314,16 +1572,24 @@ export default function StartHome() {
       return
     }
 
+    // WICHTIG: Wenn User gerade manuell ein Video ausgewählt hat, NICHT automatisch umschalten!
+    // Das verhindert das Flackern beim "Kann ich nicht" Klicken
     if (userSelectedCardRef.current !== null) {
       if (transitionPhase !== 'idle') {
         setTransitionPhase('idle')
       }
       const selectedCard =
         queue.find((card) => card.id === userSelectedCardRef.current || card.videoKey === userSelectedCardRef.current) ?? null
-      if (selectedCard && !shouldReplaceDisplayedCard(displayCard, selectedCard)) {
-        return
+      if (selectedCard) {
+        // Nur setzen wenn es wirklich das gewünschte ist, sonst ignorieren
+        if (selectedCard.id !== displayCard.id) {
+          // NOCH NICHT zurücksetzen - wir haben gerade manuell gewechselt
+          return
+        }
       }
+      // Nur zurücksetzen wenn selectedCard nicht gefunden oder bereits angezeigt
       userSelectedCardRef.current = null
+      return
     }
 
     if (displayCard.nodeId === primaryCard.nodeId) {
@@ -1333,7 +1599,7 @@ export default function StartHome() {
       const displayedCardStillExists = queue.some((card) => card.id === displayCard.id || card.videoKey === displayCard.videoKey)
       if (!displayedCardStillExists || shouldReplaceDisplayedCard(displayCard, primaryCard)) {
         userSelectedCardRef.current = null
-        setDisplayCard(primaryCard)
+        setDisplayCardSafe(primaryCard)
       }
       return
     }
@@ -1341,7 +1607,7 @@ export default function StartHome() {
     setTransitionPhase('out')
 
     swapTimerRef.current = window.setTimeout(() => {
-      setDisplayCard(primaryCard)
+      setDisplayCardSafe(primaryCard)
       setTransitionPhase('prepare')
 
       settleTimerRef.current = window.setTimeout(() => {
@@ -1376,7 +1642,7 @@ export default function StartHome() {
 
     const commentIds = (commentData ?? []).map((entry) => entry.id)
     const userIds = Array.from(new Set((commentData ?? []).map((entry) => entry.user_id).filter(Boolean)))
-    
+
     const [reactionsRes, repliesRes, replyReactionsRes, userProfilesRes] = await Promise.all([
       commentIds.length ? supabase.from('clip_comment_reactions').select('comment_id, user_id, value').in('comment_id', commentIds) : { data: [], error: null },
       commentIds.length ? supabase.from('clip_comment_replies').select('id, comment_id, user_id, author_name, author_avatar_url, content, created_at, parent_reply_id').in('comment_id', commentIds).order('created_at', { ascending: true }) : { data: [], error: null },
@@ -1499,7 +1765,7 @@ export default function StartHome() {
         }
       } catch {
         setGymSuggestions([])
-        setGymError('Gym-Vorschlaege konnten nicht geladen werden.')
+        setGymError('Gym-Vorschläge konnten nicht geladen werden.')
       } finally {
         setGymLoading(false)
       }
@@ -1574,11 +1840,14 @@ export default function StartHome() {
     setEvents((current) => [optimisticEvent, ...current])
 
     setSavingId(null)
-
     setFeedback(null)
+    
     if (options?.validatedFromQuiz && !validatedIds.includes(card.nodeId)) {
       setValidatedIds((current) => [...current, card.nodeId])
     }
+    
+    // WICHTIG: Lade NICHT sofort neu - das blockiert die UI!
+    // Stattdessen laden wir im Hintergrund
     const nextPlan = await loadActivePlan()
     if (payload.nodeCompleted && !payload.wasAlreadyCompleted && nextPlan) {
       const nextNodeId = nextPlan.unlockSummary.currentNodeId
@@ -1599,8 +1868,10 @@ export default function StartHome() {
         )
       }
     }
-    await loadState()
-    await loadServerQueue()
+    
+    // Lade State im Hintergrund OHNE await - UI soll nicht blockieren!
+    void loadState()
+    void loadServerQueue()
   }
 
   function triggerProgressPulse() {
@@ -1645,11 +1916,15 @@ export default function StartHome() {
     const activeTechniqueCard =
       visibleTechniqueQueueCards.find((card) => card.id === visibleCard.id || card.clipUrl === visibleCardResolvedClip?.url) ?? visibleCard
     const activeTechniqueIndex = visibleTechniqueQueueCards.findIndex((card) => card.id === activeTechniqueCard.id)
-    const nextTechniqueCard =
-      activeTechniqueIndex >= 0 && visibleTechniqueQueueCards.length > 1
-        ? visibleTechniqueQueueCards[(activeTechniqueIndex + 1) % visibleTechniqueQueueCards.length]
-        : null
-    const shouldCreditProgress = result === 'known' && givesNewProgress(activeTechniqueCard)
+    
+    // WICHTIG: Nächstes Video berechnen - NICHT im Kreis laufen!
+    let nextTechniqueCard = null
+    if (activeTechniqueIndex >= 0 && activeTechniqueIndex < visibleTechniqueQueueCards.length - 1) {
+      nextTechniqueCard = visibleTechniqueQueueCards[activeTechniqueIndex + 1]
+    }
+    
+    const isKnown = result === 'known'
+    const shouldCreditProgress = isKnown && givesNewProgress(activeTechniqueCard)
 
     if (shouldCreditProgress) {
       setFlyingVideoStyle(buildFlyingVideoStyle())
@@ -1664,11 +1939,13 @@ export default function StartHome() {
       window.setTimeout(() => setIsShaking(false), 420)
     }
 
+    // IMMER zum nächsten Video wechseln wenn eins vorhanden!
+    // GLEICHER delay für beide Aktionen für konsistentes Verhalten
     if (nextTechniqueCard) {
-      const delay = shouldCreditProgress ? 520 : 260
+      const delay = 520 // Gleicher delay für "Kann ich" und "Kann ich nicht"
       userSelectedCardRef.current = nextTechniqueCard.id
       window.setTimeout(() => {
-        setDisplayCard(nextTechniqueCard)
+        setDisplayCardSafe(nextTechniqueCard)
       }, delay)
     }
 
@@ -1755,29 +2032,29 @@ export default function StartHome() {
 
     const payload = manualGymMode
       ? {
-          gym_name: manualGymName.trim(),
-          gym_place_id: null,
-          gym_location: null,
-          gym_types: [],
-          gym_source: 'manual',
-          gym_unlisted_name: manualGymName.trim(),
-          gym_verified: false,
-        }
+        gym_name: manualGymName.trim(),
+        gym_place_id: null,
+        gym_location: null,
+        gym_types: [],
+        gym_source: 'manual',
+        gym_unlisted_name: manualGymName.trim(),
+        gym_verified: false,
+      }
       : selectedGym
         ? {
-            gym_name: selectedGym.name,
-            gym_place_id: selectedGym.placeId,
-            gym_location: selectedGym.location,
-            gym_types: selectedGym.types,
-            gym_source: 'google',
-            gym_unlisted_name: null,
-            gym_verified: true,
-          }
+          gym_name: selectedGym.name,
+          gym_place_id: selectedGym.placeId,
+          gym_location: selectedGym.location,
+          gym_types: selectedGym.types,
+          gym_source: 'google',
+          gym_unlisted_name: null,
+          gym_verified: true,
+        }
         : null
 
     if (!payload || (!manualGymMode && !selectedGym) || (manualGymMode && !manualGymName.trim())) {
       setSavingGym(false)
-      setFeedback('Waehle zuerst ein Gym aus oder trage dein Gym manuell ein.')
+      setFeedback('Wähle zuerst ein Gym aus oder trage dein Gym manuell ein.')
       return
     }
 
@@ -1791,13 +2068,13 @@ export default function StartHome() {
     setStartState((current) =>
       current
         ? {
-            ...current,
-            gymName: payload.gym_name,
-            gymPlaceId: payload.gym_place_id,
-            gymLocation: payload.gym_location,
-            gymSource: payload.gym_source,
-            gymUnlistedName: payload.gym_unlisted_name,
-          }
+          ...current,
+          gymName: payload.gym_name,
+          gymPlaceId: payload.gym_place_id,
+          gymLocation: payload.gym_location,
+          gymSource: payload.gym_source,
+          gymUnlistedName: payload.gym_unlisted_name,
+        }
         : current
     )
     window.dispatchEvent(new Event('profile-ready-changed'))
@@ -1900,7 +2177,7 @@ export default function StartHome() {
     const isReplying = replyingToReply[reply.id] ?? false
     const hasNestedReplies = reply.replies && reply.replies.length > 0
     const isExpanded = expandedReplies[reply.id] ?? false
-    
+
     return (
       <div className={`${depth > 0 ? 'ml-8 border-l-2 border-white/5 pl-3' : ''}`}>
         <div className="mb-3 flex gap-2">
@@ -1914,9 +2191,9 @@ export default function StartHome() {
           <div className="flex-1">
             <div className="flex items-center gap-2">
               {reply.nationality && (
-                <img 
-                  src={getFlagSvgUrl(reply.nationality ?? undefined) ?? undefined} 
-                  alt={reply.nationality} 
+                <img
+                  src={getFlagSvgUrl(reply.nationality ?? undefined) ?? undefined}
+                  alt={reply.nationality}
                   className="h-4 w-6 rounded-[2px] object-cover"
                 />
               )}
@@ -1926,27 +2203,27 @@ export default function StartHome() {
             <p className="text-sm text-white/70">{reply.text}</p>
             {commentFeaturesReady && (
               <div className="mt-2 flex items-center gap-3">
-                <button 
-                  onClick={() => void submitReplyReaction(reply.id, 1)} 
+                <button
+                  onClick={() => void submitReplyReaction(reply.id, 1)}
                   className={`flex items-center gap-1 text-xs ${reply.userReaction === 1 ? 'text-bjj-gold' : 'text-white/40 hover:text-white/70'}`}
                 >
                   👍 {reply.likes}
                 </button>
-                <button 
-                  onClick={() => void submitReplyReaction(reply.id, -1)} 
+                <button
+                  onClick={() => void submitReplyReaction(reply.id, -1)}
                   className={`flex items-center gap-1 text-xs ${reply.userReaction === -1 ? 'text-red-400' : 'text-white/40 hover:text-white/70'}`}
                 >
                   👎 {reply.dislikes}
                 </button>
-                <button 
-                  onClick={() => setReplyingToReply((current) => ({ ...current, [reply.id]: !current[reply.id] }))} 
+                <button
+                  onClick={() => setReplyingToReply((current) => ({ ...current, [reply.id]: !current[reply.id] }))}
                   className="text-xs text-white/40 hover:text-white/70"
                 >
                   Antworten
                 </button>
                 {hasNestedReplies && (
-                  <button 
-                    onClick={() => setExpandedReplies((current) => ({ ...current, [reply.id]: !current[reply.id] }))} 
+                  <button
+                    onClick={() => setExpandedReplies((current) => ({ ...current, [reply.id]: !current[reply.id] }))}
                     className="text-xs text-white/40 hover:text-white/70"
                   >
                     {isExpanded ? 'Antworten ausblenden' : `Antworten (${reply.replies.length})`}
@@ -1954,28 +2231,28 @@ export default function StartHome() {
                 )}
               </div>
             )}
-            
+
             {/* Reply input for this reply */}
             {isReplying && commentFeaturesReady && (
               <div className="mt-3 flex gap-2">
-                <textarea 
-                  value={replyDrafts[reply.id] ?? ''} 
-                  onChange={(event) => setReplyDrafts((current) => ({ ...current, [reply.id]: event.target.value }))} 
-                  rows={1} 
-                  placeholder="Antworten..." 
+                <textarea
+                  value={replyDrafts[reply.id] ?? ''}
+                  onChange={(event) => setReplyDrafts((current) => ({ ...current, [reply.id]: event.target.value }))}
+                  rows={1}
+                  placeholder="Antworten..."
                   className="flex-1 resize-none border-b border-white/20 bg-transparent text-sm text-white outline-none placeholder:text-white/40 focus:border-bjj-gold"
                 />
-                <button 
-                  type="button" 
-                  disabled={submittingReplyId === reply.id || !(replyDrafts[reply.id] ?? '').trim()} 
-                  onClick={() => void submitNestedReply(commentId, reply.id)} 
+                <button
+                  type="button"
+                  disabled={submittingReplyId === reply.id || !(replyDrafts[reply.id] ?? '').trim()}
+                  onClick={() => void submitNestedReply(commentId, reply.id)}
                   className="text-sm text-bjj-gold disabled:opacity-50"
                 >
                   Senden
                 </button>
               </div>
             )}
-            
+
             {/* Nested replies */}
             {isExpanded && reply.replies?.map((nestedReply) => (
               <ReplyComponent key={nestedReply.id} reply={nestedReply} commentId={commentId} depth={depth + 1} />
@@ -1987,173 +2264,89 @@ export default function StartHome() {
   }
 
   // Onboarding check - must be before any conditional returns
+  // WICHTIG: Onboarding nur für NEUE User (kein Gym) - nicht während des Trainings!
   const needsOnboarding = useMemo(() => {
     if (loading) return false // Don't show during loading
     if (!startState) return false // Don't show if no user
+    if (!profileLoaded) return false // Don't show until profile is fully loaded
     
-    // Check if user has completed all onboarding steps
-    const hasArchetype = Boolean(startState.primaryArchetype)
+    // Wenn Onboarding schonmal abgeschlossen wurde → niemals wieder zeigen
+    if (hasCompletedOnboardingRef.current) return false
+    
+    // Wenn Queue bereits geladen ist (Videos verfügbar) → niemals Onboarding
+    if (queue.length > 0) return false
+    
+    // Wenn User schon Videos gesehen hat (Training läuft) → niemals Onboarding
+    if (events.length > 0) {
+      hasCompletedOnboardingRef.current = true
+      return false
+    }
+    
+    // Wenn User schon completed/validated hat → niemals Onboarding
+    if (completedIds.length > 0 || validatedIds.length > 0) {
+      hasCompletedOnboardingRef.current = true
+      return false
+    }
+    
+    // Onboarding nur zeigen wenn NOCH KEIN GYM gesetzt ist
     const hasGymSet = Boolean(startState.gymPlaceId ?? startState.gymName ?? startState.gymUnlistedName)
     
-    return !hasArchetype || !hasGymSet
-  }, [startState, loading])
+    // Wenn Gym vorhanden, merken wir uns das und zeigen Onboarding nie wieder
+    if (hasGymSet) {
+      hasCompletedOnboardingRef.current = true
+      return false
+    }
+    
+    // Nur wenn kein Gym → Onboarding zeigen
+    return !hasGymSet
+  }, [startState, loading, profileLoaded, events.length, completedIds.length, validatedIds.length, queue.length])
 
   if (loading) {
-    return <div className="h-40 rounded-3xl border border-bjj-border bg-bjj-card shimmer" />
-  }
-
-  // Warte bis das Profil geladen wurde, bevor wir den Archetyp-Check machen
-  if (!profileLoaded || !startState) {
-    return <div className="h-40 rounded-3xl border border-bjj-border bg-bjj-card shimmer" />
-  }
-
-  // Zeige Archetyp-Quiz nur wenn: 
-  // 1. Profil geladen UND 
-  // 2. Kein Archetype zugewiesen (null oder leerer String) UND
-  // 3. Kein activePlan vorhanden (User hat noch nicht mit dem Training begonnen)
-  const hasArchetype = Boolean(startState.primaryArchetype && startState.primaryArchetype !== '')
-  const hasStartedTraining = Boolean(effectiveActivePlan && completedIds.length > 0)
-  
-  if (!assignedArchetype && !hasArchetype && !hasStartedTraining) {
     return (
-      <div className="relative overflow-hidden rounded-[2.5rem] border border-white/10 bg-[#0f1419] px-6 py-10 text-white shadow-[0_30px_80px_rgba(0,0,0,0.35)] md:px-10 md:py-12">
-        <div className="pointer-events-none absolute -left-20 top-0 h-64 w-64 rounded-full bg-[#ff006e]/15 blur-[120px]" />
-        <div className="pointer-events-none absolute right-[-5rem] top-1/2 h-72 w-72 rounded-full bg-[#00f2ff]/12 blur-[130px]" />
-
-        <div className="grid items-center gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-          <section className="overflow-hidden rounded-[2.2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,242,255,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-6 md:p-8">
-            <div className="flex items-center gap-3">
-              <Sparkles className="h-5 w-5 text-[#ccff00]" />
-              <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-300">Archetypen-Quiz</p>
-            </div>
-            <h1 className="mt-6 text-4xl font-black uppercase leading-[0.95] md:text-6xl xl:text-7xl">
-              Finde deinen Archetyp.
-              <span className="mt-2 block text-[#ff006e]">Starte dein A-Game.</span>
-            </h1>
-            <p className="mt-5 max-w-2xl text-base leading-relaxed text-slate-300 md:text-lg">
-              Der Funnel und die Funktionen bleiben gleich. Wir setzen die Startseite nur visuell in die neue Richtung um.
-            </p>
-            <div className="mt-10 flex flex-nowrap items-center gap-3 overflow-x-auto pb-2">
-              {flowSteps.map((step, index) => (
-                <div key={step} className="flex shrink-0 items-center gap-3">
-                  <div className="rounded-[1.5rem] border border-white/10 bg-black/20 px-5 py-4 text-sm font-black uppercase tracking-[0.16em] text-white md:min-w-[150px] md:text-base">
-                    {step}
-                  </div>
-                  {index < flowSteps.length - 1 ? <ChevronUp className="h-5 w-5 rotate-90 text-[#00f2ff]" /> : null}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-6 backdrop-blur-xl md:p-8">
-            <p className="text-xs font-black uppercase tracking-[0.28em] text-slate-400">Next Step</p>
-            <h2 className="mt-3 text-3xl font-black uppercase leading-tight md:text-4xl">Welche Route passt zu deinem Stil?</h2>
-            <p className="mt-4 text-sm leading-relaxed text-slate-300 md:text-base">
-              Fuenf Fragen reichen, damit dein Gameplan nicht nach Zufall wirkt.
-            </p>
-            <button
-              onClick={() => router.push('/archetype-test')}
-              className="mt-6 inline-flex w-full items-center justify-center rounded-[1.4rem] bg-[#ff006e] px-6 py-4 text-lg font-black uppercase tracking-[0.12em] text-white shadow-[0_0_28px_rgba(255,0,110,0.32)] transition hover:-translate-y-0.5"
-            >
-              Archetypen herausfinden
-            </button>
-          </section>
+      <div className="space-y-5">
+        <div className="overflow-hidden rounded-[1.4rem] border border-white/10 bg-[linear-gradient(180deg,rgba(19,25,36,0.96),rgba(12,16,24,0.95))] p-6">
+          <div className="h-[320px] rounded-[1.2rem] bg-white/[0.04] shimmer" />
+          <div className="mt-5 h-3 w-40 rounded-full bg-white/10" />
+          <div className="mt-3 h-10 w-72 rounded-2xl bg-white/10" />
+          <div className="mt-6 h-24 rounded-[1.1rem] bg-white/[0.04]" />
         </div>
       </div>
     )
   }
 
-  if (!hasGym && needsOnboarding) {
+  // Zeige Fehlermeldung wenn vorhanden
+  if (loadError) {
     return (
-      <div className="flex min-h-[calc(100vh-110px)] items-center justify-center">
-        <section className="w-full max-w-5xl rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-10 shadow-card md:px-10 md:py-14">
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-bjj-gold">Step 2</p>
-          <h1 className="mt-4 text-4xl font-black text-white md:text-6xl">Erstelle dein Gym</h1>
-          <p className="mt-4 max-w-2xl text-lg text-bjj-muted">
-            Trage dein Gym direkt ein. Du prüfst es später als Admin und bestätigst dann, ob es wirklich existiert.
-          </p>
-
-          <div className="mt-8 max-w-2xl">
-            <label className="block text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Gym-Name</label>
-            <input
-              value={manualGymName}
-              onChange={(event) => setManualGymName(event.target.value)}
-              placeholder="z. B. Fightschool Hannover oder Unisport Grappling Berlin"
-              className="mt-3 w-full rounded-2xl border border-bjj-border bg-bjj-card px-5 py-4 text-lg text-white outline-none placeholder:text-bjj-muted"
-            />
-            <p className="mt-3 text-sm text-bjj-muted">
-              Erlaubt sind BJJ-Gyms, MMA-Gyms, Vereine, Universitäten, Sporthallen oder Fitnessstudios mit Grappling/BJJ-Angebot.
-            </p>
-            {gymError ? <p className="mt-3 text-sm text-red-300">{gymError}</p> : null}
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void saveGymAndContinue()}
-                disabled={savingGym || !manualGymName.trim()}
-                className="rounded-xl bg-bjj-gold px-6 py-3 text-base font-black text-bjj-coal disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {savingGym ? 'Speichert...' : 'Gym erstellen'}
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-10 rounded-2xl border border-bjj-border bg-bjj-card/70 p-5">
-            <p className="text-sm font-bold uppercase tracking-[0.18em] text-bjj-gold">Optional</p>
-            <p className="mt-2 text-sm text-bjj-muted">
-              Wenn du spaeter doch Google-Vorschlaege nutzen willst, kannst du die Suche wieder aktivieren.
-            </p>
-            <button
-              type="button"
-              onClick={() => setManualGymMode(false)}
-              className="mt-4 rounded-xl border border-bjj-border bg-bjj-surface px-5 py-3 text-sm font-semibold text-bjj-muted"
-            >
-              Google-Suche oeffnen
-            </button>
-          </div>
-
-          {!manualGymMode ? (
-            <div className="mt-8">
-              <label className="block text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Gym suchen</label>
-              <input value={gymQuery} onChange={(event) => { setGymQuery(event.target.value); setSelectedGym(null) }} placeholder="z. B. Fightschool Hannover" className="mt-3 w-full rounded-2xl border border-bjj-border bg-bjj-card px-5 py-4 text-lg text-white outline-none placeholder:text-bjj-muted" />
-              {gymLoading ? <p className="mt-3 text-sm text-bjj-muted">Gym-Vorschlaege werden geladen...</p> : null}
-              {gymError ? <p className="mt-3 text-sm text-red-300">{gymError}</p> : null}
-
-              {gymSuggestions.length > 0 ? (
-                <div className="mt-4 overflow-hidden rounded-2xl border border-bjj-border bg-bjj-card">
-                  {gymSuggestions.map((suggestion) => (
-                    <button key={suggestion.placeId} type="button" onClick={() => void selectGymSuggestion(suggestion)} className="flex w-full items-start justify-between gap-4 border-b border-white/10 px-5 py-4 text-left last:border-b-0 hover:bg-white/5">
-                      <div>
-                        <p className="text-lg font-semibold text-white">{suggestion.name}</p>
-                        <p className="mt-1 text-sm text-bjj-muted">{suggestion.secondaryText || suggestion.description}</p>
-                      </div>
-                      <span className="rounded-full bg-white/5 px-3 py-1 text-xs font-semibold text-bjj-muted">{suggestion.types[0] ?? 'Place'}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {selectedGym ? (
-                <div className="mt-5 rounded-2xl border border-bjj-gold/30 bg-bjj-gold/10 p-5">
-                  <p className="text-sm font-bold uppercase tracking-[0.16em] text-bjj-gold">Ausgewaehlt</p>
-                  <p className="mt-2 text-xl font-black text-white">{selectedGym.name}</p>
-                  <p className="mt-2 text-sm text-bjj-muted">{selectedGym.location}</p>
-                </div>
-              ) : null}
-
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                <button type="button" onClick={() => void saveGymAndContinue()} disabled={savingGym || !selectedGym} className="rounded-xl bg-bjj-gold px-6 py-3 text-base font-black text-bjj-coal disabled:cursor-not-allowed disabled:opacity-50">
-                  {savingGym ? 'Speichert...' : 'Google-Gym uebernehmen'}
-                </button>
-                <button type="button" onClick={() => { setManualGymMode(true); setGymSuggestions([]); setSelectedGym(null); setGymError(null) }} className="rounded-xl border border-bjj-border bg-bjj-card px-6 py-3 text-sm font-semibold text-bjj-muted">
-                  Zurueck zu manueller Erstellung
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </section>
+      <div className="rounded-[1.4rem] border border-red-500/30 bg-red-950/30 p-6 text-center">
+        <p className="text-red-300">{loadError}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-4 rounded-xl bg-bjj-gold px-4 py-2 text-sm font-bold text-bjj-coal"
+        >
+          Seite neu laden
+        </button>
       </div>
     )
   }
+
+  // Warte bis das Profil geladen wurde
+  if (!profileLoaded || !startState) {
+    return (
+      <div className="space-y-5">
+        <div className="overflow-hidden rounded-[1.4rem] border border-white/10 bg-[linear-gradient(180deg,rgba(19,25,36,0.96),rgba(12,16,24,0.95))] p-6">
+          <div className="h-[320px] rounded-[1.2rem] bg-white/[0.04] shimmer" />
+          <div className="mt-5 h-3 w-40 rounded-full bg-white/10" />
+          <div className="mt-3 h-10 w-72 rounded-2xl bg-white/10" />
+          <div className="mt-6 h-24 rounded-[1.1rem] bg-white/[0.04]" />
+        </div>
+      </div>
+    )
+  }
+
+  // WICHTIG: Onboarding passiert jetzt auf separaten Seiten (/name-input, /onboarding)
+  // StartHome zeigt NUR Videos, nie Onboarding-UI
+  // Redirect wird von AppShell gehandhabt
 
   if (!visibleCard) {
     return (
@@ -2193,6 +2386,24 @@ export default function StartHome() {
           {validationFeedback}
         </div>
       ) : null}
+
+      {/* User Stats Header */}
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-bjj-gold/20 bg-bjj-gold/5 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-bjj-gold/20 text-bjj-gold">
+            <Check className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-muted">Gelernte Clips</p>
+            <p className="text-xl font-black text-bjj-gold">{startState.techniquesLearnedCount}</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-white/60">Jeder Clip, den du mit</p>
+          <p className="text-xs text-white/60">&quot;Kann ich&quot; markierst, zählt +1</p>
+        </div>
+      </div>
+
       {/* Clean YouTube-Style Layout */}
       <div className="space-y-6">
         <div className="relative w-full">
@@ -2205,11 +2416,12 @@ export default function StartHome() {
             >
               {visibleCardResolvedClip?.url ? (
                 <YoutubeEmbed
-                  key={videoKey}
+                  key={`${visibleCard?.videoKey ?? visibleCard?.id}-player`}
                   title={visibleCardResolvedClip?.title ?? visibleCard.clipTitle}
                   url={visibleCardResolvedClip?.url ?? visibleCard.clipUrl}
                   showHeader={false}
                   playbackRate={playbackRate}
+                  resetKey={videoKey}
                 />
               ) : (
                 <div className="flex aspect-video items-center justify-center">
@@ -2257,7 +2469,7 @@ export default function StartHome() {
                     <RotateCcw className="h-4 w-4" />
                     <span>Zum Start</span>
                   </button>
-                  
+
                   {/* Mobile: Nur Icon */}
                   <button
                     type="button"
@@ -2324,17 +2536,16 @@ export default function StartHome() {
                     setIsLoadingSaved(false)
                   }}
                   disabled={isLoadingSaved || !activeSavedClipId}
-                  className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition disabled:opacity-50 ${
-                    isSavedClip
+                  className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition disabled:opacity-50 ${isSavedClip
                       ? 'border-bjj-gold/40 bg-bjj-gold/16 text-bjj-gold'
                       : 'border-white/10 bg-white/[0.05] text-white/80 hover:bg-white/[0.1] hover:text-white'
-                  } ${'hidden lg:inline-flex'}`}
+                    } ${'hidden lg:inline-flex'}`}
                   title={isSavedClip ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen'}
                 >
                   <Bookmark className={`h-4 w-4 ${isSavedClip ? 'fill-current' : ''}`} />
                   <span>{isSavedClip ? 'Gespeichert' : 'Favorit'}</span>
                 </button>
-                
+
                 {/* Mobile: Nur Bookmark Icon */}
                 <button
                   type="button"
@@ -2374,11 +2585,10 @@ export default function StartHome() {
                     setIsLoadingSaved(false)
                   }}
                   disabled={isLoadingSaved || !activeSavedClipId}
-                  className={`lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-lg border transition disabled:opacity-50 ${
-                    isSavedClip
+                  className={`lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-lg border transition disabled:opacity-50 ${isSavedClip
                       ? 'border-bjj-gold/40 bg-bjj-gold/16 text-bjj-gold'
                       : 'border-white/10 bg-white/[0.05] text-white/80 hover:bg-white/[0.1] hover:text-white'
-                  }`}
+                    }`}
                   title={isSavedClip ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen'}
                 >
                   <Bookmark className={`h-5 w-5 ${isSavedClip ? 'fill-current' : ''}`} />
@@ -2400,9 +2610,8 @@ export default function StartHome() {
                         key={mode}
                         type="button"
                         onClick={() => handleDebugQueueModeChange(mode as 'normal' | 'new')}
-                        className={`rounded-md px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] transition ${
-                          debugQueueMode === mode ? 'bg-bjj-gold/20 text-bjj-gold' : 'text-white/42 hover:text-white/72'
-                        }`}
+                        className={`rounded-md px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] transition ${debugQueueMode === mode ? 'bg-bjj-gold/20 text-bjj-gold' : 'text-white/42 hover:text-white/72'
+                          }`}
                       >
                         {label}
                       </button>
@@ -2429,14 +2638,62 @@ export default function StartHome() {
                       </div>
                     )
                   })}
-                    {debugQueueCards.length === 0 ? (
-                      <p className="rounded-lg border border-white/8 bg-black/12 px-3 py-2 text-xs text-white/46">
-                        Keine neuen Videos mit Unlock-Fortschritt in der aktuellen Queue.
-                      </p>
-                    ) : null}
-                  </div>
+                  {debugQueueCards.length === 0 ? (
+                    <p className="rounded-lg border border-white/8 bg-black/12 px-3 py-2 text-xs text-white/46">
+                      Keine neuen Videos mit Unlock-Fortschritt in der aktuellen Queue.
+                    </p>
+                  ) : null}
                 </div>
-              )}
+              </div>
+            )}
+
+            {/* Top 5 Videos aus der Queue */}
+            {topFiveCardsWithClips.length > 1 && (
+              <div className="rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
+                <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/58">
+                  <span>Nächste Videos</span>
+                  <span>{topFiveCardsWithClips.length} Clips</span>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {topFiveCardsWithClips.map((card, index) => {
+                    if (!card.resolvedClip?.url) return null
+                    const isActive = visibleCard?.videoKey === card.videoKey
+                    return (
+                      <button
+                        key={card.videoKey}
+                        type="button"
+                        onClick={() => {
+                          setDisplayCardSafe({ ...card, clipUrl: card.resolvedClip!.url, clipTitle: card.resolvedClip!.title })
+                          setVideoKey((prev) => prev + 1)
+                        }}
+                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition ${isActive
+                            ? 'bg-bjj-gold/20 border border-bjj-gold/40'
+                            : 'bg-white/[0.03] hover:bg-white/[0.06]'
+                          }`}
+                      >
+                        <div className="flex h-6 w-6 items-center justify-center rounded bg-white/10 text-xs font-bold text-white/60">
+                          {index + 1}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className={`truncate text-sm ${isActive ? 'text-bjj-gold' : 'text-white/90'}`}>
+                            {card.resolvedClip.title}
+                          </p>
+                          <div className="mt-0.5 flex items-center gap-2">
+                            <p className="text-xs text-white/50">{card.title}</p>
+                            {card.videoStatus && (
+                              <span className={`text-[10px] font-medium ${card.videoStatus === 'kann-ich' ? 'text-green-400' : card.videoStatus === 'gesehen' ? 'text-yellow-400' : 'text-white/40'}`}>
+                                {card.videoStatus === 'kann-ich' ? 'Kann ich' : card.videoStatus === 'gesehen' ? 'Gesehen' : 'Offen'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {isActive && <span className="rounded bg-bjj-gold/30 px-2 py-0.5 text-[10px] font-bold text-bjj-gold">AKTIV</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Titel - über dem Fortschritts-Block */}
             <h2 className="text-left text-xl font-bold text-white">
@@ -2451,7 +2708,7 @@ export default function StartHome() {
             {/* Progress Bar - unter dem Video */}
             <div className="mt-4 rounded-[1.15rem] border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="flex items-center justify-between gap-3 text-[11px] font-black uppercase tracking-[0.22em] text-white/58">
-                <span>Nächste Technik</span>
+                <span>Nächste Videos</span>
                 <span className={progressCountFlash ? 'start-home-count-flash' : ''}>
                   {currentTechniqueProgress.completed}/{currentTechniqueProgress.total}
                 </span>
@@ -2470,13 +2727,13 @@ export default function StartHome() {
               </div>
             </div>
 
-            </div>
           </div>
         </div>
+      </div>
 
 
- 
-       {/* Legacy layout kept for rollback
+
+      {/* Legacy layout kept for rollback
        <div className="start-layout-replace">
          responseActions={
            <>
@@ -2487,7 +2744,7 @@ export default function StartHome() {
          metaActions={
            <div className="flex flex-wrap items-center gap-2">
              <a href={visibleCard.clipUrl} target="_blank" rel="noreferrer" className="inline-flex rounded-lg bg-[linear-gradient(90deg,#8f4ad0,#3c87f0)] px-4 py-2 text-xs font-black text-white">Open in YouTube</a>
-             <Link href={`/node/${visibleCard.nodeId}`} className="inline-flex rounded-lg border border-[#606983] bg-[#2c3447] px-4 py-2 text-xs font-black text-white">Node oeffnen</Link>
+             <Link href={`/node/${visibleCard.nodeId}`} className="inline-flex rounded-lg border border-[#606983] bg-[#2c3447] px-4 py-2 text-xs font-black text-white">Node öffnen</Link>
            </div>
          }
        />
@@ -2495,7 +2752,7 @@ export default function StartHome() {
       {/* Simple YouTube-Style Comments */}
       <section className="mt-8 border-t border-white/10 pt-6">
         <h3 className="text-lg font-bold text-white">{comments.length} Kommentare</h3>
-        
+
         {/* Comment Input */}
         <div className="mt-4 flex gap-3">
           {startState?.avatarUrl ? (
@@ -2506,25 +2763,25 @@ export default function StartHome() {
             </div>
           )}
           <div className="flex-1">
-            <textarea 
-              value={commentDraft} 
-              onChange={(event) => setCommentDraft(event.target.value)} 
-              rows={2} 
-              placeholder="Kommentar hinzufügen..." 
+            <textarea
+              value={commentDraft}
+              onChange={(event) => setCommentDraft(event.target.value)}
+              rows={2}
+              placeholder="Kommentar hinzufügen..."
               className="w-full resize-none border-b border-white/20 bg-transparent pb-2 text-sm text-white outline-none placeholder:text-white/40 focus:border-bjj-gold"
             />
             <div className="mt-2 flex justify-end gap-2">
-              <button 
-                type="button" 
-                onClick={() => setCommentDraft('')} 
+              <button
+                type="button"
+                onClick={() => setCommentDraft('')}
                 className="rounded-full px-4 py-2 text-sm font-medium text-white/60 hover:text-white"
               >
                 Abbrechen
               </button>
-              <button 
-                type="button" 
-                disabled={submittingComment || !commentDraft.trim()} 
-                onClick={() => void submitComment()} 
+              <button
+                type="button"
+                disabled={submittingComment || !commentDraft.trim()}
+                onClick={() => void submitComment()}
                 className="rounded-full bg-bjj-gold px-4 py-2 text-sm font-bold text-bjj-coal disabled:opacity-50"
               >
                 Kommentieren
@@ -2548,9 +2805,9 @@ export default function StartHome() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     {comment.nationality && (
-                      <img 
-                        src={getFlagSvgUrl(comment.nationality ?? undefined) ?? undefined} 
-                        alt={comment.nationality} 
+                      <img
+                        src={getFlagSvgUrl(comment.nationality ?? undefined) ?? undefined}
+                        alt={comment.nationality}
                         className="h-4 w-6 rounded-[2px] object-cover"
                       />
                     )}
@@ -2560,27 +2817,27 @@ export default function StartHome() {
                   <p className="mt-1 text-sm text-white/80">{comment.text}</p>
                   {commentFeaturesReady && (
                     <div className="mt-2 flex items-center gap-4">
-                      <button 
-                        onClick={() => void submitReaction(comment.id, 1)} 
+                      <button
+                        onClick={() => void submitReaction(comment.id, 1)}
                         className={`flex items-center gap-1 text-xs ${comment.userReaction === 1 ? 'text-bjj-gold' : 'text-white/50 hover:text-white'}`}
                       >
                         👍 {comment.likes}
                       </button>
-                      <button 
-                        onClick={() => void submitReaction(comment.id, -1)} 
+                      <button
+                        onClick={() => void submitReaction(comment.id, -1)}
                         className={`flex items-center gap-1 text-xs ${comment.userReaction === -1 ? 'text-red-400' : 'text-white/50 hover:text-white'}`}
                       >
                         👎 {comment.dislikes}
                       </button>
-                      <button 
-                        onClick={() => setExpandedReplies((current) => ({ ...current, [comment.id]: !current[comment.id] }))} 
+                      <button
+                        onClick={() => setExpandedReplies((current) => ({ ...current, [comment.id]: !current[comment.id] }))}
                         className="text-xs text-white/50 hover:text-white"
                       >
                         {expandedReplies[comment.id] ? 'Antworten ausblenden' : `Antworten ${comment.replies.length > 0 ? `(${comment.replies.length})` : ''}`}
                       </button>
                     </div>
                   )}
-                  
+
                   {/* Replies */}
                   {expandedReplies[comment.id] && (
                     <div className="mt-3 pl-4 border-l-2 border-white/10">
@@ -2589,17 +2846,17 @@ export default function StartHome() {
                       ))}
                       {commentFeaturesReady && (
                         <div className="flex gap-2">
-                          <textarea 
-                            value={replyDrafts[comment.id] ?? ''} 
-                            onChange={(event) => setReplyDrafts((current) => ({ ...current, [comment.id]: event.target.value }))} 
-                            rows={1} 
-                            placeholder="Antworten..." 
+                          <textarea
+                            value={replyDrafts[comment.id] ?? ''}
+                            onChange={(event) => setReplyDrafts((current) => ({ ...current, [comment.id]: event.target.value }))}
+                            rows={1}
+                            placeholder="Antworten..."
                             className="flex-1 resize-none border-b border-white/20 bg-transparent text-sm text-white outline-none placeholder:text-white/40 focus:border-bjj-gold"
                           />
-                          <button 
-                            type="button" 
-                            disabled={submittingReplyId === comment.id || !(replyDrafts[comment.id] ?? '').trim()} 
-                            onClick={() => void submitReply(comment.id)} 
+                          <button
+                            type="button"
+                            disabled={submittingReplyId === comment.id || !(replyDrafts[comment.id] ?? '').trim()}
+                            onClick={() => void submitReply(comment.id)}
                             className="text-sm text-bjj-gold disabled:opacity-50"
                           >
                             Senden

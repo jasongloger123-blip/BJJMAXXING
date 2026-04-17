@@ -98,6 +98,13 @@ export default function ArchetypeResultPage() {
 
     setSavingSelection(true)
 
+    // Prüfe ob User bereits einen Namen im Profil hat
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('full_name')
+      .eq('id', user.id)
+      .maybeSingle()
+
     // Speichere die Archetypen im Profil
     const { error } = await supabase.from('user_profiles').upsert({
       id: user.id,
@@ -114,8 +121,14 @@ export default function ArchetypeResultPage() {
     clearPendingArchetypeResult()
     setHasPendingSelection(false)
     window.dispatchEvent(new Event('profile-ready-changed'))
-    // Leite zur Namensabfrage weiter, dann Onboarding für Gym
-    window.location.assign('/name-input')
+    
+    // Wenn User bereits einen Namen hat → direkt zum Onboarding (Gym)
+    // Wenn kein Name → zur Namensabfrage
+    if (profile?.full_name?.trim()) {
+      window.location.assign('/onboarding')
+    } else {
+      window.location.assign('/name-input')
+    }
   }
 
   useEffect(() => {
@@ -151,7 +164,16 @@ export default function ArchetypeResultPage() {
   if (!authenticated) {
     return (
       <div className="min-h-screen bg-[#0d0b09] text-white">
-        <main className="mx-auto flex min-h-screen w-full max-w-5xl items-center px-6 py-10 md:px-8">
+        {/* Header mit BJJMAXXING Logo als Zurück-Button */}
+        <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/5 bg-[#0d0b09]/95 px-6 py-4 backdrop-blur-sm">
+          <div className="mx-auto flex max-w-5xl items-center justify-between">
+            <Link href="/" className="flex items-center gap-2">
+              <span className="rounded bg-[#ff006e] px-1.5 py-0.5 text-xs font-black text-white">BJJ</span>
+              <span className="font-black text-white">MAXXING</span>
+            </Link>
+          </div>
+        </header>
+        <main className="mx-auto flex min-h-screen w-full max-w-5xl items-center px-6 py-10 pt-24 md:px-8">
           <section className="w-full rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-8 text-center shadow-card md:px-10 md:py-10">
             <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Quiz abgeschlossen</p>
             <h1 className="mt-4 text-4xl font-black tracking-[-0.04em] md:text-6xl">Dein Archetyp ist bereit</h1>
@@ -164,7 +186,7 @@ export default function ArchetypeResultPage() {
                 <ArchetypeCard archetype={result.primary} highlight />
               </div>
               <div className="mt-6 grid gap-3 md:grid-cols-3">
-                {['Dein Haupt-Archetyp', 'Persoenlicher Startplan', 'Direkter Einstieg ins System'].map((item) => (
+                {['Dein Haupt-Archetyp', 'Persönlicher Startplan', 'Direkter Einstieg ins System'].map((item) => (
                   <div key={item} className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-4 text-sm font-semibold text-white/85">
                     {item}
                   </div>
@@ -194,7 +216,16 @@ export default function ArchetypeResultPage() {
 
   return (
     <div className="min-h-screen bg-[#0d0b09] text-white">
-      <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-10 md:px-8">
+      {/* Header mit BJJMAXXING Logo als Zurück-Button */}
+      <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/5 bg-[#0d0b09]/95 px-6 py-4 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-6xl items-center justify-between">
+          <Link href="/" className="flex items-center gap-2">
+            <span className="rounded bg-[#ff006e] px-1.5 py-0.5 text-xs font-black text-white">BJJ</span>
+            <span className="font-black text-white">MAXXING</span>
+          </Link>
+        </div>
+      </header>
+      <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-10 pt-24 md:px-8">
         <section className="w-full rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-8 shadow-card md:px-10 md:py-10">
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Dein Ergebnis</p>
           <h1 className="mt-4 text-4xl font-black tracking-[-0.04em] md:text-6xl">Das ist dein Archetyp</h1>

@@ -487,7 +487,7 @@ export default function AdminUserQueuePage() {
                         href={`/node/${item.nodeId}`}
                         className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-white/80 transition hover:border-bjj-gold/30 hover:text-bjj-gold"
                       >
-                        Technik oeffnen
+                        Technik öffnen
                         <ArrowRight className="h-4 w-4" />
                       </Link>
                       {clipUrl ? (
@@ -497,7 +497,7 @@ export default function AdminUserQueuePage() {
                           rel="noreferrer"
                           className="inline-flex items-center gap-2 rounded-full border border-bjj-gold/20 bg-bjj-gold/10 px-4 py-2 text-xs font-semibold text-bjj-gold transition hover:bg-bjj-gold/15"
                         >
-                          Clip oeffnen
+                          Clip öffnen
                           <ExternalLink className="h-4 w-4" />
                         </a>
                       ) : null}

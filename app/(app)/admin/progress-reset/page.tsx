@@ -56,7 +56,7 @@ export default function AdminProgressResetPage() {
         <p className="text-xs font-black uppercase tracking-[0.22em] text-bjj-gold">Admin Tool</p>
         <h1 className="mt-2 text-3xl font-black text-white">Fortschritt resetten</h1>
         <p className="mt-2 text-sm leading-6 text-white/60">
-          Setzt `training_clip_events` und `progress` fuer einen User zurueck. Danach startet Startseite und Gameplan wieder bei 0.
+          Setzt `training_clip_events` und `progress` für einen User zurück. Danach startet Startseite und Gameplan wieder bei 0.
         </p>
       </div>
 
@@ -66,7 +66,7 @@ export default function AdminProgressResetPage() {
           <div>
             <h2 className="font-bold text-white">Achtung</h2>
             <p className="mt-1 text-sm leading-6 text-white/62">
-              Diese Aktion loescht den kompletten Fortschritt des ausgewaehlten Users. Das ist absichtlich fuer Tests gedacht.
+              Diese Aktion löscht den kompletten Fortschritt des ausgewählten Users. Das ist absichtlich für Tests gedacht.
             </p>
           </div>
         </div>
@@ -97,7 +97,7 @@ export default function AdminProgressResetPage() {
 
       {result ? (
         <section className={`rounded-[1.4rem] border p-4 ${result.ok ? 'border-emerald-400/25 bg-emerald-500/10' : 'border-red-400/25 bg-red-500/10'}`}>
-          <p className="font-bold text-white">{result.ok ? result.message ?? 'Fortschritt wurde zurueckgesetzt.' : result.error ?? 'Reset fehlgeschlagen.'}</p>
+          <p className="font-bold text-white">{result.ok ? result.message ?? 'Fortschritt wurde zurückgesetzt.' : result.error ?? 'Reset fehlgeschlagen.'}</p>
           {result.profile ? (
             <p className="mt-2 text-sm text-white/62">
               {result.profile.email ?? result.profile.username ?? result.profile.id} · {result.profile.id}

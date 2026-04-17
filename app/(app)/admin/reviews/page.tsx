@@ -252,7 +252,7 @@ export default function AdminReviewsPage() {
       <section className="rounded-[2rem] border border-bjj-border bg-bjj-card p-6 shadow-card">
         {!selectedReview ? (
           <div className="rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-5 text-sm text-bjj-muted">
-            Waehle links eine Einreichung aus.
+            Wähle links eine Einreichung aus.
           </div>
         ) : (
           <div className="space-y-6">
@@ -274,7 +274,7 @@ export default function AdminReviewsPage() {
                 rel="noreferrer"
                 className="mt-3 inline-flex text-sm font-semibold text-bjj-gold hover:text-bjj-orange-light"
               >
-                Link oeffnen
+                Link öffnen
               </a>
               <p className="mt-2 break-all text-sm text-bjj-muted">{selectedReview.video_url}</p>
             </div>
@@ -306,12 +306,12 @@ export default function AdminReviewsPage() {
               </div>
 
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Feedback fuer den Nutzer</p>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-bjj-gold">Feedback für den Nutzer</p>
                 <textarea
                   value={feedbackDraft}
                   onChange={(event) => setFeedbackDraft(event.target.value)}
                   rows={10}
-                  placeholder="Was war gut? Was fehlt noch? Welcher naechste Schritt ist sinnvoll?"
+                  placeholder="Was war gut? Was fehlt noch? Welcher nächste Schritt ist sinnvoll?"
                   className="mt-3 w-full rounded-2xl border border-bjj-border bg-bjj-surface px-4 py-3 text-sm text-bjj-text"
                 />
               </div>

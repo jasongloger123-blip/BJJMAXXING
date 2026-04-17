@@ -39,6 +39,8 @@ export type QueueScoreReason = {
   description: string
 }
 
+export type VideoStatus = 'offen' | 'gesehen' | 'kann-ich'
+
 export type QueueCard = {
   id: string
   nodeId: string
@@ -85,6 +87,7 @@ export type QueueCard = {
   contentType?: ClipContentType
   learningPhase?: ClipLearningPhase
   targetArchetypeIds?: string[]
+  videoStatus?: VideoStatus
 }
 
 export type QueueClipCandidate = {
@@ -243,6 +246,26 @@ function getLearningStatus(status?: TrainingClipStatus | null): TrainingClipLear
   if (status.confidence_score < 60) return 'LEARNING'
   if (status.confidence_score < 85) return 'STABLE'
   return 'MASTERED'
+}
+
+export function calculateVideoStatus(status?: TrainingClipStatus | null): VideoStatus {
+  if (!status) {
+    // No status at all = user has never interacted with this video
+    return 'offen'
+  }
+
+  // If user clicked "Kann ich" at least once, it's always "kann-ich"
+  if (status.can_count > 0) {
+    return 'kann-ich'
+  }
+
+  // If video was seen (seen_count > 0) but no "Kann Ich" clicked yet
+  if (status.seen_count > 0) {
+    return 'gesehen'
+  }
+
+  // Video exists in status but never seen (shouldn't happen, but handle gracefully)
+  return 'offen'
 }
 
 function getStatusLookup(statuses?: TrainingClipStatus[]) {
@@ -459,7 +482,7 @@ export function buildStartQueue(
         'main',
         validationPending ? 'Heute - Validierung' : 'Heute - Pflicht',
         validationPending
-          ? 'Dieser Schritt ist fast fertig. Es fehlt nur noch die Validierung fuer den naechsten Unlock.'
+          ? 'Dieser Schritt ist fast fertig. Es fehlt nur noch die Validierung für den nächsten Unlock.'
           : 'Diese Technik ist gerade dein naechster Schritt im aktiven Gameplan.'
       ),
       createPlanFallbackCard(
@@ -503,15 +526,17 @@ export function buildStartQueue(
         'main',
         validationPending ? 'Heute - Validierung' : 'Heute - Pflicht',
         validationPending
-          ? 'Dieser Schritt ist fast fertig. Es fehlt nur noch die Validierung fuer den naechsten Unlock.'
+          ? 'Dieser Schritt ist fast fertig. Es fehlt nur noch die Validierung für den nächsten Unlock.'
           : 'Diese Technik ist gerade dein naechster Schritt im aktiven Gameplan.'
       ),
     ]
   }
 
-  const activeCards = orderedVideos.slice(0, 1).map((video, queueIndex): QueueCard => {
+  // Include ALL videos for the active node, not just the first one
+  const activeCards = orderedVideos.map((video, queueIndex): QueueCard => {
     const status = statusByKey.get(video.key)
     const learningStatus = getLearningStatus(status)
+    const videoStatus = calculateVideoStatus(status)
     const isDue = Boolean(status && status.next_review_step <= currentStep)
     const isCore = isCoreRole(video.role)
     const progressCreditEarned = Boolean(status && ((status.can_count ?? 0) > 0 || status.last_result === 'known'))
@@ -547,8 +572,8 @@ export function buildStartQueue(
       comments: [],
       helperText:
         orderedVideos.length > 1
-          ? `Video ${queueIndex + 1} von ${orderedVideos.length} fuer ${activeNode.title}.`
-          : 'Die App zeigt dir genau das naechste Video fuer deinen aktuellen Fokus.',
+          ? `Video ${queueIndex + 1} von ${orderedVideos.length} für ${activeNode.title}.`
+          : 'Die App zeigt dir genau das nächste Video für deinen aktuellen Fokus.',
       learningStatus,
       confidenceScore: status?.confidence_score ?? 0,
       progressCreditEarned,
@@ -557,6 +582,7 @@ export function buildStartQueue(
       nextReviewStep: status?.next_review_step,
       priorityScore: video.priorityScore,
       scoreReasons: video.scoreReasons,
+      videoStatus,
     }
   })
 
@@ -590,6 +616,7 @@ export function buildStartQueue(
 
       const status = getStatusLookup(reviewNodeStatuses).get(reviewVideo.key)
       const learningStatus = getLearningStatus(status)
+      const videoStatus = calculateVideoStatus(status)
       const isDue = Boolean(status && status.next_review_step <= currentStep)
       const progressCreditEarned = Boolean(status && ((status.can_count ?? 0) > 0 || status.last_result === 'known'))
 
@@ -632,14 +659,18 @@ export function buildStartQueue(
           nextReviewStep: status?.next_review_step,
           priorityScore: reviewVideo.priorityScore,
           scoreReasons: reviewVideo.scoreReasons,
+          videoStatus,
         },
       ]
     })
 
-  // Maximal 5 Karten: 1 Hauptkarte + bis zu 4 Review-Karten
-  // Die erste Karte ist immer vom aktiven Node, die restlichen von anderen Nodes
+  // Maximal 8 Karten: alle Videos vom aktiven Node + bis zu 4 Review-Karten
+  // Die Karten vom aktiven Node kommen zuerst, die restlichen von anderen Nodes
   const maxReviewCards = 4
-  const limitedReviewCards = reviewCards.slice(0, maxReviewCards)
+  const maxTotalCards = 8
+  const activeCardCount = activeCards.length
+  const reviewSlotsAvailable = Math.min(maxReviewCards, maxTotalCards - activeCardCount)
+  const limitedReviewCards = reviewCards.slice(0, reviewSlotsAvailable)
   
   return [...activeCards, ...limitedReviewCards]
 }

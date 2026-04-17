@@ -68,6 +68,7 @@ type CreatorProfile = {
   role: string
   initials: string
   avatarUrl: string | null
+  techniquesLearnedCount: number
 }
 
 const STAGE_ORDER: StageKey[] = ['position', 'pass', 'submission']
@@ -781,17 +782,17 @@ function getConnectionDetails(fromNode: PlanNode, toNode: PlanNode) {
 
   return {
     title: `${fromNode.title} -> ${toNode.title}`,
-    label: isStandUpToGuard ? 'Uebergang in die Guard' : 'Connection Videos',
+    label: isStandUpToGuard ? 'Übergang in die Guard' : 'Connection Videos',
     description: isStandUpToGuard
-      ? 'Dieser Pfeil zeigt dir den Uebergang aus dem Stand in die Closed Guard mit Material aus der vorherigen Technik und aus der Zieltechnik.'
-      : `Hier siehst du den Uebergang aus ${fromNode.title} in ${toNode.title} mit Videos vom vorherigen Schritt und der Zieltechnik.`,
+      ? 'Dieser Pfeil zeigt dir den Übergang aus dem Stand in die Closed Guard mit Material aus der vorherigen Technik und aus der Zieltechnik.'
+      : `Hier siehst du den Übergang aus ${fromNode.title} in ${toNode.title} mit Videos vom vorherigen Schritt und der Zieltechnik.`,
     outcome: isStandUpToGuard
       ? 'Macht den Weg von Stand Up in Closed Guard direkt im Gameplan sichtbar.'
-      : `Zeigt dir den konkreten naechsten Schritt von ${fromNode.title} nach ${toNode.title}.`,
+      : `Zeigt dir den konkreten nächsten Schritt von ${fromNode.title} nach ${toNode.title}.`,
     focus: [
       `Einstieg aus ${fromNode.title} sauber lesen`,
-      `Timing fuer den Wechsel in ${toNode.title}`,
-      `Videos fuer ${toNode.title} direkt im Plan weiter oeffnen`,
+      `Timing für den Wechsel in ${toNode.title}`,
+      `Videos für ${toNode.title} direkt im Plan weiter öffnen`,
     ],
   }
 }
@@ -812,9 +813,9 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       stage: 'position',
       label: 'Startposition',
       description: 'Hier beginnt dein Game Plan im Stand, bevor du in deine Guard-Verbindungen oder direkten Folgepfade gehst.',
-      outcome: 'Definiert den Einstiegspunkt fuer den A-Plan und die Verbindung in deine Close Guard.',
-      focus: ['Ersten Kontakt im Stand lesen', 'Balance vor dem Uebergang halten', 'Verbindung in die Guard frueh vorbereiten'],
-      mistakes: ['Zu statisch im Stand bleiben', 'Ohne Verbindung nach unten gehen', 'Die Folgeposition zu spaet aufbauen'],
+      outcome: 'Definiert den Einstiegspunkt für den A-Plan und die Verbindung in deine Close Guard.',
+      focus: ['Ersten Kontakt im Stand lesen', 'Balance vor dem Übergang halten', 'Verbindung in die Guard früh vorbereiten'],
+      mistakes: ['Zu statisch im Stand bleiben', 'Ohne Verbindung nach unten gehen', 'Die Folgeposition zu spät aufbauen'],
       state: 'completed',
       expansionPaths: [
         ['closed-guard', 'backtake', 'rear-naked-choke'],
@@ -830,9 +831,9 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       stage: 'position',
       label: 'Kontrolle & Grips',
       description: 'Hier baust du Kontrolle, Griffkampf und Winkel auf, bevor du den Gegner wirklich kippst.',
-      outcome: 'Gibt dir stabile Struktur fuer Kuzushi, Backtakes und Sweep-Druck.',
+      outcome: 'Gibt dir stabile Struktur für Kuzushi, Backtakes und Sweep-Druck.',
       focus: ['Knie geschlossen halten', 'Kopfhaltung stoeren', 'Sauberen Zug an Arm oder Schulter holen'],
-      mistakes: ['Zu flach unter dem Gegner bleiben', 'Guard oeffnen ohne Grund', 'Keine aktive Griffkontrolle'],
+      mistakes: ['Zu flach unter dem Gegner bleiben', 'Guard öffnen ohne Grund', 'Keine aktive Griffkontrolle'],
       state: 'completed',
       expansionPaths: [
         ['backtake', 'rear-naked-choke'],
@@ -847,10 +848,10 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Off-Balance',
       stage: 'pass',
       label: 'Gleichgewicht brechen',
-      description: 'Du zwingst den Gegner nach vorne, zur Seite oder auf die Haende, damit sein Ruecken offen wird.',
-      outcome: 'Schafft die ideale Vorarbeit fuer Backtake, Sweep oder Front-Headlock.',
-      focus: ['Kopf ueber die Hips ziehen', 'Winkel vor Kraft nutzen', 'Reaktion lesen und nachsetzen'],
-      mistakes: ['Nur mit Armen reissen', 'Zu frueh oeffnen', 'Gegner wieder stabil werden lassen'],
+      description: 'Du zwingst den Gegner nach vorne, zur Seite oder auf die Haende, damit sein Rücken offen wird.',
+      outcome: 'Schafft die ideale Vorarbeit für Backtake, Sweep oder Front-Headlock.',
+      focus: ['Kopf über die Hips ziehen', 'Winkel vor Kraft nutzen', 'Reaktion lesen und nachsetzen'],
+      mistakes: ['Nur mit Armen reissen', 'Zu früh öffnen', 'Gegner wieder stabil werden lassen'],
       state: 'current',
       expansionPaths: [
         ['backtake', 'seatbelt-control', 'rear-naked-choke'],
@@ -862,10 +863,10 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Back Take',
       stage: 'position',
       label: 'Position sichern',
-      description: 'Sobald der Gegner die Linie verliert, gehst du hinter die Huefte und uebernimmst den Ruecken.',
-      outcome: 'Fuehrt in deine hoechstwertige Kontroll- und Submission-Position.',
-      focus: ['Huefte hinterlaufen', 'Brustkontakt halten', 'Seatbelt vor hektischen Hooks sichern'],
-      mistakes: ['Zu frueh nur auf die Hooks gehen', 'Seitlich am Ruecken haengen', 'Kopfposition verlieren'],
+      description: 'Sobald der Gegner die Linie verliert, gehst du hinter die Hüfte und übernimmst den Rücken.',
+      outcome: 'Führt in deine höchstwertige Kontroll- und Submission-Position.',
+      focus: ['Hüfte hinterlaufen', 'Brustkontakt halten', 'Seatbelt vor hektischen Hooks sichern'],
+      mistakes: ['Zu früh nur auf die Hooks gehen', 'Seitlich am Rücken hängen', 'Kopfposition verlieren'],
       state: 'available',
       expansionPaths: [['seatbelt-control'], ['rear-naked-choke'], ['back-crucifix']],
     },
@@ -874,9 +875,9 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Hip Bump Sweep',
       stage: 'pass',
       label: 'Alternative Position',
-      description: 'Wenn der Gegner aufrecht bleibt, nutzt du die Reaktion fuer einen direkten Sweep.',
+      description: 'Wenn der Gegner aufrecht bleibt, nutzt du die Reaktion für einen direkten Sweep.',
       outcome: 'Zweite starke Reaktion aus derselben Closed-Guard-Arbeit.',
-      focus: ['Hand posten erzwingen', 'Huefte seitlich hochbringen'],
+      focus: ['Hand posten erzwingen', 'Hüfte seitlich hochbringen'],
       mistakes: ['Zu weit weg bleiben', 'Keine Schulterlinie erzeugen'],
       state: 'available',
       expansionPaths: [['kuzushi-details', 'backtake']],
@@ -898,10 +899,10 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Backtake Route',
       stage: 'pass',
       label: 'Direkter Winkel',
-      description: 'Du oeffnest nur kurz, gewinnst den Winkel und nimmst direkt den Ruecken oder die Trap-Line.',
-      outcome: 'Direkterer Weg zum Ruecken aus der Closed Guard.',
-      focus: ['Winkel zuerst', 'Rueckenlinie offen halten'],
-      mistakes: ['Zu gross oeffnen', 'Huefte nicht mitnehmen'],
+      description: 'Du öffnest nur kurz, gewinnst den Winkel und nimmst direkt den Rücken oder die Trap-Line.',
+      outcome: 'Direkterer Weg zum Rücken aus der Closed Guard.',
+      focus: ['Winkel zuerst', 'Rückenlinie offen halten'],
+      mistakes: ['Zu groß öffnen', 'Hüfte nicht mitnehmen'],
       state: 'available',
       expansionPaths: [['triangle-path', 'triangle-finish']],
     },
@@ -910,9 +911,9 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Kuzushi Details',
       stage: 'pass',
       label: 'Timing',
-      description: 'Feinabstimmung fuer Zugrichtung, Timing und den Moment, in dem der Gegner wirklich leicht wird.',
+      description: 'Feinabstimmung für Zugrichtung, Timing und den Moment, in dem der Gegner wirklich leicht wird.',
       outcome: 'Macht dein Off-Balancing sauberer und reproduzierbarer.',
-      focus: ['Zugrichtung wechseln', 'Hand und Huefte koppeln'],
+      focus: ['Zugrichtung wechseln', 'Hand und Hüfte koppeln'],
       mistakes: ['Immer nur in eine Richtung ziehen', 'Timing nicht lesen'],
       state: 'completed',
       expansionPaths: [['backtake']],
@@ -922,10 +923,10 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Front Headlock',
       stage: 'position',
       label: 'Kontrolle',
-      description: 'Wenn der Gegner nach vorne kippt, kontrollierst du Kopf und Schulter fuer den direkten Finish.',
+      description: 'Wenn der Gegner nach vorne kippt, kontrollierst du Kopf und Schulter für den direkten Finish.',
       outcome: 'Sichert den guillotine-lastigen Zweig.',
       focus: ['Kopf nach unten halten', 'Schulter blockieren'],
-      mistakes: ['Nur am Hals haengen', 'Huefte zu weit weg'],
+      mistakes: ['Nur am Hals hängen', 'Hüfte zu weit weg'],
       state: 'available',
       expansionPaths: [['mounted-guillotine']],
     },
@@ -946,10 +947,10 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Triangle Path',
       stage: 'submission',
       label: 'Alternative Finish',
-      description: 'Wenn der Ruecken nicht frei wird, klappst du auf die Triangle-Linie um.',
+      description: 'Wenn der Rücken nicht frei wird, klappst du auf die Triangle-Linie um.',
       outcome: 'Haelt den Gegner zwischen Backtake und Submission gefangen.',
-      focus: ['Knie ueber Schulter bringen', 'Winkel halten'],
-      mistakes: ['Flach bleiben', 'Zu spaet das Bein schwingen'],
+      focus: ['Knie über Schulter bringen', 'Winkel halten'],
+      mistakes: ['Flach bleiben', 'Zu spät das Bein schwingen'],
       state: 'locked',
       expansionPaths: [['triangle-finish']],
     },
@@ -961,7 +962,7 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       description: 'Kontrollierter Abschluss aus der Front-Headlock-Linie.',
       outcome: 'Direkter Finish, wenn der Kopf vorne bleibt.',
       focus: ['Brust schwer machen', 'Wristline fixieren'],
-      mistakes: ['Zu frueh fallen', 'Kein Druck ueber den ganzen Koerper'],
+      mistakes: ['Zu früh fallen', 'Kein Druck über den ganzen Körper'],
       state: 'locked',
     },
     'single-leg-finish': {
@@ -980,10 +981,10 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Seatbelt Control',
       stage: 'position',
       label: 'Kontrolle',
-      description: 'Sichert den Ruecken vor dem eigentlichen Finish.',
+      description: 'Sichert den Rücken vor dem eigentlichen Finish.',
       outcome: 'Macht den Finish-Druck belastbar.',
       focus: ['Brustkontakt', 'Handlinie sichern'],
-      mistakes: ['Haken vor Seatbelt', 'Zu flach am Ruecken'],
+      mistakes: ['Haken vor Seatbelt', 'Zu flach am Rücken'],
       state: 'completed',
     },
     'rear-naked-choke': {
@@ -991,7 +992,7 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Rear Naked Choke',
       stage: 'submission',
       label: 'Submission',
-      description: 'Klassischer Abschluss aus stabiler Rueckenkontrolle.',
+      description: 'Klassischer Abschluss aus stabiler Rückenkontrolle.',
       outcome: 'High-value Finish des A-Plans.',
       focus: ['Kinnlinie lesen', 'Ellbogen nach hinten ziehen'],
       mistakes: ['Zu viel squeeze ohne Position', 'Schulter nicht hinter dem Kopf'],
@@ -1002,9 +1003,9 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Back Crucifix',
       stage: 'submission',
       label: 'Alternative Finish',
-      description: 'Wechsel auf eine kontrollierte Arm-Isolation vom Ruecken.',
+      description: 'Wechsel auf eine kontrollierte Arm-Isolation vom Rücken.',
       outcome: 'Alternative Endroute, wenn der Choke blockiert wird.',
-      focus: ['Arm einklemmen', 'Huefte dicht halten'],
+      focus: ['Arm einklemmen', 'Hüfte dicht halten'],
       mistakes: ['Zu locker am Oberkoerper', 'Winkel verlieren'],
       state: 'locked',
     },
@@ -1013,8 +1014,8 @@ const DEFAULT_A_PLAN_CONFIG: PlanConfig = {
       title: 'Triangle Finish',
       stage: 'submission',
       label: 'Submission',
-      description: 'Sauberer Abschluss, wenn der Gegner den Rueckenweg blockiert.',
-      outcome: 'Dritte vernuenftige Endroute aus derselben Guard-Struktur.',
+      description: 'Sauberer Abschluss, wenn der Gegner den Rückenweg blockiert.',
+      outcome: 'Dritte vernünftige Endroute aus derselben Guard-Struktur.',
       focus: ['Winkel schliessen', 'Knie zusammenziehen'],
       mistakes: ['Zu frontal bleiben', 'Kein Zug am Kopf'],
       state: 'locked',
@@ -1027,7 +1028,7 @@ const TECHNICAL_A_PLAN_CONFIG: PlanConfig = {
   title: 'A-Plan',
   headline: 'Long Technical Guard Player',
   creatorName: 'Flexible Guard',
-  creatorRole: 'A-Plan fuer deinen Archetyp',
+  creatorRole: 'A-Plan für deinen Archetyp',
   creatorInitials: 'FG',
   creatorProfileHref: '/profile',
   mainPath: ['leg-entry', 'leg-control', 'leg-isolation', 'knee-submission'],
@@ -1055,8 +1056,8 @@ const TECHNICAL_A_PLAN_CONFIG: PlanConfig = {
       label: 'Ashi Garami / Single Leg X',
       description: 'Hier stellst du Ashi Garami oder Single Leg X sauber her und fixierst das Bein.',
       outcome: 'Gibt dir Kontrolle, bevor du das Bein wirklich isolierst.',
-      focus: ['Knie eng um die Huefte', 'Ferse kontrollieren', 'Gegner auf ein Bein setzen'],
-      mistakes: ['Fuesse offen lassen', 'Zu lose um die Huefte sein', 'Keine Kontrolle ueber die Ferse'],
+      focus: ['Knie eng um die Hüfte', 'Ferse kontrollieren', 'Gegner auf ein Bein setzen'],
+      mistakes: ['Füße offen lassen', 'Zu lose um die Hüfte sein', 'Keine Kontrolle über die Ferse'],
       state: 'completed',
       expansionPaths: [
         ['leg-isolation', 'knee-submission'],
@@ -1071,7 +1072,7 @@ const TECHNICAL_A_PLAN_CONFIG: PlanConfig = {
       description: 'Du brichst die Balance, bringst das Knie aus der sicheren Linie und isolierst den Fuss.',
       outcome: 'Macht dein Straight Foot Lock erst wirklich erreichbar.',
       focus: ['Knie ausrichten', 'Off-Balance in die richtige Richtung', 'Fusslinie isolieren'],
-      mistakes: ['Nur am Fuss ziehen', 'Keine Gewichtsverlagerung erzwingen', 'Zu frueh ins Finish gehen'],
+      mistakes: ['Nur am Fuß ziehen', 'Keine Gewichtsverlagerung erzwingen', 'Zu früh ins Finish gehen'],
       state: 'current',
       expansionPaths: [['knee-submission'], ['wrestle-up', 'single-leg-finish']],
     },
@@ -1083,7 +1084,7 @@ const TECHNICAL_A_PLAN_CONFIG: PlanConfig = {
       description: 'Aus der isolierten Beinlinie schliesst du den Straight Foot Lock sauber ab.',
       outcome: 'Ein klares Finish aus deinem Haupt-Leg-Flow.',
       focus: ['Ellbogen eng', 'Fersenlinie fixieren', 'Hips sauber unter den Fuss bringen'],
-      mistakes: ['Zu viel mit Armen ziehen', 'Knie-Linie nicht kontrollieren', 'Zu frueh aufmachen'],
+      mistakes: ['Zu viel mit Armen ziehen', 'Knie-Linie nicht kontrollieren', 'Zu früh aufmachen'],
       state: 'available',
       expansionPaths: [['finish-details']],
     },
@@ -1116,10 +1117,10 @@ const TECHNICAL_A_PLAN_CONFIG: PlanConfig = {
       title: 'Finish Details',
       stage: 'submission',
       label: 'Feinabstimmung',
-      description: 'Feine Anpassungen fuer Griff, Winkel und Spannung am Fuss.',
+      description: 'Feine Anpassungen für Griff, Winkel und Spannung am Fuß.',
       outcome: 'Erhoeht deine Abschlussquote in Live-Rolls.',
       focus: ['Unterarm sauber platzieren', 'Ferse auf Linie halten'],
-      mistakes: ['Falscher Handwinkel', 'Druck zu spaet setzen'],
+      mistakes: ['Falscher Handwinkel', 'Druck zu spät setzen'],
       state: 'locked',
     },
     'wrestle-up': {
@@ -1128,7 +1129,7 @@ const TECHNICAL_A_PLAN_CONFIG: PlanConfig = {
       stage: 'pass',
       label: 'Alternative Pass',
       description: 'Wenn der Gegner zu weit entlastet, kommst du nach oben.',
-      outcome: 'Bricht die Linie und fuehrt in Takedown-Finish.',
+      outcome: 'Bricht die Linie und führt in Takedown-Finish.',
       focus: ['Hand am Boden nutzen', 'Kopf ueber Knie bringen'],
       mistakes: ['Zu spaet aufstehen', 'Ruecken rund lassen'],
       state: 'available',
@@ -1178,7 +1179,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         stage: 'position',
         label: 'Shield',
         description: 'Haltet Distanz und baut den Underhook auf.',
-        outcome: 'Sichert Struktur fuer den Aufstieg.',
+        outcome: 'Sichert Struktur für den Aufstieg.',
         focus: ['Knie aktiv', 'Unterarm laenger machen'],
         mistakes: ['Zu flach', 'Kein Kopfrahmen'],
         state: 'current',
@@ -1190,8 +1191,8 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         stage: 'pass',
         label: 'Rise',
         description: 'Der eigentliche Aufstieg aus Half Guard.',
-        outcome: 'Fuehrt in Sweep oder Takedown.',
-        focus: ['Kopf hoch', 'Huefte unter den Gegner'],
+        outcome: 'Führt in Sweep oder Takedown.',
+        focus: ['Kopf hoch', 'Hüfte unter den Gegner'],
         mistakes: ['Zu tief bleiben', 'Kein Winkel'],
         state: 'available',
         expansionPaths: [['sweep-finish'], ['single-leg-finish']],
@@ -1204,7 +1205,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         description: 'Sauberer Abschluss in Top-Position.',
         outcome: 'Bringt dich direkt in dominante Top-Control.',
         focus: ['Oben bleiben', 'Crossface sichern'],
-        mistakes: ['Zu frueh loslassen', 'Kein Base nach dem Sweep'],
+        mistakes: ['Zu früh loslassen', 'Kein Base nach dem Sweep'],
         state: 'locked',
       },
       dogfight: {
@@ -1225,7 +1226,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         stage: 'pass',
         label: 'Takedown',
         description: 'Finish der alternativen Half-Guard-Linie.',
-        outcome: 'Top-Position ueber Takedown.',
+        outcome: 'Top-Position über Takedown.',
         focus: ['Winkel laufen'],
         mistakes: ['Gerade stehen bleiben'],
         state: 'available',
@@ -1249,7 +1250,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         label: 'Entry',
         description: 'Offene Guard mit Distanzkontrolle als Start.',
         outcome: 'Bereitet Inside Position vor.',
-        focus: ['Fuesse aktiv', 'Hand-Fight frueh'],
+        focus: ['Füße aktiv', 'Hand-Fight früh'],
         mistakes: ['Zu statisch', 'Zu gerade vor dem Gegner'],
         state: 'completed',
         expansionPaths: [['inside-position', 'ashi-entry', 'leglock-finish'], ['shin-on-shin', 'single-leg-x', 'outside-heel-hook']],
@@ -1259,7 +1260,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         title: 'Inside Position',
         stage: 'position',
         label: 'Kontrolle',
-        description: 'Kontrolliert die innere Linie und macht Ashi moeglich.',
+        description: 'Kontrolliert die innere Linie und macht Ashi möglich.',
         outcome: 'Verbindet Distanzkontrolle mit Beinangriff.',
         focus: ['Knie innen', 'Hips mobil halten'],
         mistakes: ['Beine zu weit weg', 'Kein Frame auf den Schultern'],
@@ -1272,9 +1273,9 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         stage: 'pass',
         label: 'Entry',
         description: 'Der eigentliche Einstieg in die Leglock-Struktur.',
-        outcome: 'Sichert die Beinlinie fuer den Finish.',
+        outcome: 'Sichert die Beinlinie für den Finish.',
         focus: ['Knie klemmen', 'Ferse kontrollieren'],
-        mistakes: ['Zu lose Beine', 'Keine Hueftnahe'],
+        mistakes: ['Zu lose Beine', 'Keine Hüftnähe'],
         state: 'available',
         expansionPaths: [['leglock-finish'], ['outside-heel-hook']],
       },
@@ -1286,7 +1287,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         description: 'Abschluss des C-Plans.',
         outcome: 'Submissions aus kontrollierter Beinlinie.',
         focus: ['Knie trennen', 'Ferse verstecken lassen'],
-        mistakes: ['Zu viel Ruecklage', 'Keine Knieklemme'],
+        mistakes: ['Zu viel Rücklage', 'Keine Knieklemme'],
         state: 'locked',
       },
       'shin-on-shin': {
@@ -1294,8 +1295,8 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         title: 'Shin on Shin',
         stage: 'position',
         label: 'Alternative Position',
-        description: 'Alternative Inside-Entry fuer offene Guard.',
-        outcome: 'Fuehrt in dieselbe Legline mit anderem Timing.',
+        description: 'Alternative Inside-Entry für offene Guard.',
+        outcome: 'Führt in dieselbe Legline mit anderem Timing.',
         focus: ['Schienbein aktiv'],
         mistakes: ['Kein Zug am Fuss'],
         state: 'available',
@@ -1319,7 +1320,7 @@ const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
         stage: 'submission',
         label: 'Alternative Finish',
         description: 'Alternative Leglock-Endroute.',
-        outcome: 'Sekundaerer Endpunkt fuer den C-Plan.',
+        outcome: 'Sekundärer Endpunkt für den C-Plan.',
         focus: ['Knie kontrollieren'],
         mistakes: ['Fersenlinie verlieren'],
         state: 'locked',
@@ -1378,18 +1379,26 @@ export default function GameplanPage() {
     const patchedNodes = Object.fromEntries(
       Object.entries(basePlan.nodes).map(([nodeId, node]) => {
         const sourceNodeId = node.sourceNodeId ?? node.id
+        // Priorität 1: clipProgressByNodeId (Live-Daten aus DB)
         const progress = clipProgressByNodeId[node.id] ?? clipProgressByNodeId[sourceNodeId]
-        if (!progress) return [nodeId, node]
-
-        return [
-          nodeId,
-          {
-            ...node,
-            progressCompletedRules: progress.completed,
-            progressTotalRules: progress.total,
-            progressPercent: progress.percent,
-          },
-        ]
+        if (progress) {
+          return [
+            nodeId,
+            {
+              ...node,
+              progressCompletedRules: progress.completed,
+              progressTotalRules: progress.total,
+              progressPercent: progress.percent,
+            },
+          ]
+        }
+        
+        // Priorität 2: Node hat bereits Progress aus API (z.B. von gameplan/active)
+        if (node.progressTotalRules && node.progressTotalRules > 0) {
+          return [nodeId, node]
+        }
+        
+        return [nodeId, node]
       })
     ) as Record<string, PlanNode>
 
@@ -1838,26 +1847,27 @@ export default function GameplanPage() {
   useEffect(() => {
     let active = true
 
-    async function ensureAuthenticated() {
+    async function ensureAuthenticatedAndLoad() {
       const user = await waitForAuthenticatedUser(supabase)
       if (!active) return
 
       if (!user) {
         router.push('/login?next=/gameplan')
+        return
       }
+
+      // WICHTIG: Lade Pläne erst NACH erfolgreicher Authentifizierung
+      console.log('Gameplan: User authenticated, loading plans...')
+      await loadAvailablePlans()
     }
 
-    void ensureAuthenticated()
+    async function loadAvailablePlans() {
+      if (!active) return
 
-    return () => {
-      active = false
-    }
-  }, [router, supabase])
-
-    useEffect(() => {
-      async function loadAvailablePlans() {
-        async function fallbackToActivePlan() {
+      async function fallbackToActivePlan() {
+        try {
           const activeResponse = await fetch('/api/gameplan/active', { cache: 'no-store', headers: await getAuthHeaders() })
+          if (!active) return
           const activePayload = await activeResponse.json()
           const activePlan = (activePayload.plan ?? null) as RemoteGameplan | null
           const fallbackPlans = activePlan ? [activePlan] : []
@@ -1868,59 +1878,100 @@ export default function GameplanPage() {
             setSelectedPlanId(fallbackPlans[0].id)
             setRemotePlan(fallbackPlans[0])
           }
-        }
-
-        try {
-          const response = await fetch('/api/gameplan/list', { cache: 'no-store', headers: await getAuthHeaders() })
-          const payload = await response.json()
-          if (!response.ok) {
-            console.error('Failed to load gameplans:', payload.error)
-            await fallbackToActivePlan()
-            return
-          }
-          
-          const plans = (payload.plans ?? []) as RemoteGameplan[]
-          const persistedDisabledPlanIds = Array.isArray(payload.disabledPlanIds)
-            ? payload.disabledPlanIds.filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
-            : []
-          const activePlanId = typeof payload.activePlanId === 'string' ? payload.activePlanId : null
-          setDisabledPlanIds(persistedDisabledPlanIds)
-          setPersistedActivePlanId(activePlanId)
-          setDisabledPlanIdsLoaded(true)
-          if (plans.length > 0) {
-            setAvailablePlans(plans)
-          } else {
-            await fallbackToActivePlan()
-            return
-          }
-          
-          // Don't auto-select a plan - let user choose from overview
-          // Only set selectedPlanId if there's exactly one plan (backward compatibility)
-          const enabledPlans = plans.filter((plan) => !persistedDisabledPlanIds.includes(plan.id))
-          const preferredPlan =
-            enabledPlans.find((plan) => plan.id === activePlanId) ??
-            (enabledPlans.length === 1 ? enabledPlans[0] : null)
-          if (preferredPlan) {
-            setForceOverview(false)
-            setSelectedPlanId(preferredPlan.id)
-            setRemotePlan(preferredPlan)
-          }
         } catch (error) {
-          console.error('Error loading gameplans:', error)
-          try {
-            await fallbackToActivePlan()
-          } catch (fallbackError) {
-            console.error('Failed to load active gameplan fallback:', fallbackError)
-            setAvailablePlans([])
-          }
-          setDisabledPlanIdsLoaded(true)
-        } finally {
-          setRemotePlanLoaded(true)
+          console.error('Failed to load active gameplan fallback:', error)
         }
+      }
+
+      try {
+        const response = await fetch('/api/gameplan/list', { cache: 'no-store', headers: await getAuthHeaders() })
+        if (!active) return
+        const payload = await response.json()
+        if (!response.ok) {
+          console.error('Failed to load gameplans:', payload.error)
+          await fallbackToActivePlan()
+          return
+        }
+        
+        const plans = (payload.plans ?? []) as RemoteGameplan[]
+        const persistedDisabledPlanIds = Array.isArray(payload.disabledPlanIds)
+          ? payload.disabledPlanIds.filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
+          : []
+        const activePlanId = typeof payload.activePlanId === 'string' ? payload.activePlanId : null
+        setDisabledPlanIds(persistedDisabledPlanIds)
+        setPersistedActivePlanId(activePlanId)
+        setDisabledPlanIdsLoaded(true)
+        if (plans.length > 0) {
+          setAvailablePlans(plans)
+        } else {
+          await fallbackToActivePlan()
+          return
+        }
+        
+        // Don't auto-select a plan - let user choose from overview
+        // Only set selectedPlanId if there's exactly one plan (backward compatibility)
+        const enabledPlans = plans.filter((plan) => !persistedDisabledPlanIds.includes(plan.id))
+        const preferredPlan =
+          enabledPlans.find((plan) => plan.id === activePlanId) ??
+          (enabledPlans.length === 1 ? enabledPlans[0] : null)
+        if (preferredPlan) {
+          setForceOverview(false)
+          setSelectedPlanId(preferredPlan.id)
+          setRemotePlan(preferredPlan)
+        }
+      } catch (error) {
+        console.error('Error loading gameplans:', error)
+        try {
+          await fallbackToActivePlan()
+        } catch (fallbackError) {
+          console.error('Failed to load active gameplan fallback:', fallbackError)
+          setAvailablePlans([])
+        }
+        setDisabledPlanIdsLoaded(true)
+      } finally {
+        setRemotePlanLoaded(true)
+      }
     }
 
-    void loadAvailablePlans()
-  }, [])
+    void ensureAuthenticatedAndLoad()
+
+    return () => {
+      active = false
+    }
+  }, [router, supabase])
+
+  // WICHTIG: Initialisiere clipProgressByNodeId aus remotePlan damit die 29 Clips angezeigt werden
+  useEffect(() => {
+    if (!remotePlan) return
+
+    const progressFromRemotePlan: Record<string, { completed: number; total: number; percent: number }> = {}
+    
+    Object.entries(remotePlan.nodes).forEach(([nodeId, node]) => {
+      if (node.progressTotalRules && node.progressTotalRules > 0) {
+        progressFromRemotePlan[nodeId] = {
+          completed: node.progressCompletedRules ?? 0,
+          total: node.progressTotalRules,
+          percent: node.progressPercent ?? 0,
+        }
+        
+        // Auch für sourceNodeId speichern
+        if (node.sourceNodeId) {
+          progressFromRemotePlan[node.sourceNodeId] = {
+            completed: node.progressCompletedRules ?? 0,
+            total: node.progressTotalRules,
+            percent: node.progressPercent ?? 0,
+          }
+        }
+      }
+    })
+    
+    if (Object.keys(progressFromRemotePlan).length > 0) {
+      setClipProgressByNodeId((current) => ({
+        ...current,
+        ...progressFromRemotePlan,
+      }))
+    }
+  }, [remotePlan])
 
   useEffect(() => {
     async function loadProgress() {
@@ -2067,6 +2118,7 @@ export default function GameplanPage() {
         gym_name?: string | null
         gym_unlisted_name?: string | null
         primary_archetype?: string | null
+        techniques_learned_count?: number
       } | null
 
       const name = profile?.username ?? profile?.full_name ?? user.email?.split('@')[0] ?? 'BJJ Athlete'
@@ -2082,6 +2134,7 @@ export default function GameplanPage() {
         role: profile?.gym_name ?? profile?.gym_unlisted_name ?? 'Dein A-Plan',
         initials: initials || 'BJ',
         avatarUrl: profile?.avatar_url ?? null,
+        techniquesLearnedCount: profile?.techniques_learned_count ?? 0,
       })
       setCreatorArchetypeId(profile?.primary_archetype ?? null)
     }
@@ -2964,7 +3017,7 @@ export default function GameplanPage() {
                               ? `/node/${plan.nodes[detailEdge.to]?.sourceNodeId ?? detailNode.sourceNodeId ?? detailNode.id}`
                               : `/node/${detailNode.sourceNodeId ?? detailNode.id}`
                           }
-                          detailCtaLabel="Technik oeffnen"
+                          detailCtaLabel="Technik öffnen"
                         />
                       </div>
                     </div>

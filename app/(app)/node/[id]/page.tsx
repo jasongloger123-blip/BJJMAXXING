@@ -321,14 +321,14 @@ export default function NodeDetailPage() {
         <h1 className="mt-3 text-3xl font-black text-white">{node.title}</h1>
         <p className="mt-4 max-w-2xl text-sm leading-8 text-white/72">
           {isOutsideCurrentPlan
-            ? 'Diese Technik gehoert aktuell nicht zu deinem freigeschalteten Pfad. Sie wird erst sichtbar, wenn dein Gameplan an dieser Stelle angekommen ist.'
+            ? 'Diese Technik gehört aktuell nicht zu deinem freigeschalteten Pfad. Sie wird erst sichtbar, wenn dein Gameplan an dieser Stelle angekommen ist.'
             : currentPlanNode
-              ? `Diese Technik bleibt noch gesperrt. Arbeite zuerst an ${currentPlanNode.title}, dann geht der naechste Abschnitt in deinem Gameplan auf.`
-              : 'Diese Technik bleibt noch gesperrt, bis dein naechster Gameplan-Schritt freigeschaltet wurde.'}
+              ? `Diese Technik bleibt noch gesperrt. Arbeite zuerst an ${currentPlanNode.title}, dann geht der nächste Abschnitt in deinem Gameplan auf.`
+              : 'Diese Technik bleibt noch gesperrt, bis dein nächster Gameplan-Schritt freigeschaltet wurde.'}
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link href="/gameplan" className="inline-flex items-center gap-2 rounded-2xl bg-bjj-gold px-5 py-3 text-sm font-black text-bjj-coal">
-            Zurueck zum Gameplan
+Zurück zum Gameplan
           </Link>
           <Link href="/technique-library" className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-5 py-3 text-sm font-semibold text-white/72">
             Zur Bibliothek
@@ -344,7 +344,7 @@ export default function NodeDetailPage() {
   const counterItems = [
     'Typischer gegnerischer Counter',
     'Deine direkte Antwort',
-    'Fruehes Warnsignal',
+    'Frühes Warnsignal',
   ]
   const assignedSidebarClips = dedupeClips([
     ...archivedClips.main_reference,
@@ -455,7 +455,7 @@ export default function NodeDetailPage() {
               </div>
             ) : null}
             <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-bjj-gold">
-              Quelle oeffnen
+              Quelle öffnen
               <ArrowUpRight className="h-4 w-4" />
             </span>
           </div>
@@ -535,7 +535,7 @@ export default function NodeDetailPage() {
                   target="_blank"
                   rel="noreferrer"
                   className="absolute inset-0 flex items-center justify-center"
-                  aria-label="Video oeffnen"
+                  aria-label="Video öffnen"
                 >
                   <span className="flex h-24 w-24 items-center justify-center rounded-full border border-white/8 bg-white/10 backdrop-blur-md transition duration-300 hover:scale-105 hover:bg-white/14 md:h-28 md:w-28">
                     <Play className="ml-1 h-10 w-10 text-white md:h-12 md:w-12" />
@@ -557,7 +557,7 @@ export default function NodeDetailPage() {
                       target="_blank"
                       rel="noreferrer"
                       className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.06] backdrop-blur-md text-white transition hover:bg-white/[0.1]"
-                      aria-label="Originalvideo oeffnen"
+                      aria-label="Originalvideo öffnen"
                     >
                       <ExternalLink className="h-5 w-5" />
                     </a>
@@ -758,7 +758,7 @@ export default function NodeDetailPage() {
                 <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#7dd3fc]">Weitere Hauptvideos</p>
                 {detailClipDeck.length > 0 ? (
                   <div className="mt-5">
-                    <GameplanClipDeck clips={detailClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik oeffnen" />
+                    <GameplanClipDeck clips={detailClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik öffnen" />
                   </div>
                 ) : null}
                 <div className="mt-5 space-y-4">
@@ -791,7 +791,7 @@ export default function NodeDetailPage() {
               <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-6 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
                 {counterClipDeck.length > 0 ? (
                   <div className="mb-6">
-                    <GameplanClipDeck clips={counterClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik oeffnen" />
+                    <GameplanClipDeck clips={counterClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik öffnen" />
                   </div>
                 ) : null}
                 <div className="mt-5 space-y-4">
@@ -806,7 +806,7 @@ export default function NodeDetailPage() {
               <div className="rounded-[1.8rem] border border-white/[0.05] bg-[linear-gradient(180deg,rgba(19,24,34,0.94),rgba(12,16,24,0.92))] p-6 shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
                 {drillClipDeck.length > 0 ? (
                   <div className="mb-6">
-                    <GameplanClipDeck clips={drillClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik oeffnen" />
+                    <GameplanClipDeck clips={drillClipDeck} detailHref={`/node/${currentNode.id}`} detailCtaLabel="Technik öffnen" />
                   </div>
                 ) : null}
                 <div className="mt-5 space-y-4">

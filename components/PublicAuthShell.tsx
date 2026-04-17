@@ -29,15 +29,7 @@ export default function PublicAuthShell({
         <div className="absolute bottom-20 right-1/4 -z-10 h-64 w-64 rounded-full bg-bjj-gold/10 blur-[90px] sm:h-96 sm:w-96 sm:blur-[120px]" />
 
         <div className="w-full max-w-md">
-          <div className="mb-8 flex items-center justify-between">
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-bjj-muted transition-colors hover:text-white"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Zurueck zur Landingpage
-            </Link>
-
+          <div className="mb-8 flex items-center justify-center">
             <Link href="/" className="group flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-bjj-orange to-bjj-gold shadow-orange-glow-sm transition-transform duration-500 group-hover:scale-105">
                 <Zap className="h-5 w-5 text-white" />

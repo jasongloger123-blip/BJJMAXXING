@@ -28,9 +28,9 @@ const navItems = [
 
 const featureCards = [
   {
-    title: 'Koerpertyp-Analyse',
+    title: 'Körpertyp-Analyse',
     description:
-      'Unser System bewertet Hebel, Beweglichkeit und Stilpraeferenzen, damit dein Einstieg nicht zufaellig ist.',
+      'Unser System bewertet Hebel, Beweglichkeit und Stilpräferenzen, damit dein Einstieg nicht zufällig ist.',
     badge: 'Kostenlos',
     tone: 'blue',
     icon: Dna,
@@ -46,7 +46,7 @@ const featureCards = [
   },
   {
     title: '1:1 Reviews',
-    description: 'Reiche Sparring-Videos ein und hole dir gezieltes Feedback fuer den naechsten echten Hebel.',
+    description: 'Reiche Sparring-Videos ein und hole dir gezieltes Feedback für den nächsten echten Hebel.',
     badge: 'Premium',
     tone: 'neutral',
     icon: Video,
@@ -57,7 +57,7 @@ const featureCards = [
 const testimonials = [
   {
     quote:
-      'BJJMAXXING ist die Antwort auf die Informationsflut im Netz. Du bekommst endlich den roten Faden fuer deine Entwicklung.',
+      'BJJMAXXING ist die Antwort auf die Informationsflut im Netz. Du bekommst endlich den roten Faden für deine Entwicklung.',
     name: 'Ahmed Laaribi',
     role: 'Black Belt • Head Coach',
     accent: 'blue',
@@ -65,7 +65,7 @@ const testimonials = [
   },
   {
     quote:
-      'Ohne Struktur kein Fortschritt. Mit einem klaren Plan lernen Athleten in Monaten, wofuer sie sonst Jahre brauchen.',
+      'Ohne Struktur kein Fortschritt. Mit einem klaren Plan lernen Athleten in Monaten, wofür sie sonst Jahre brauchen.',
     name: 'Jason Gloger',
     role: 'Purple Belt • Community Lead',
     accent: 'pink',
@@ -139,7 +139,7 @@ export default function PublicLanding() {
               type="button"
               onClick={() => setMobileMenuOpen((current) => !current)}
               className="flex items-center justify-center p-2 text-white md:hidden"
-              aria-label={mobileMenuOpen ? 'Menue schliessen' : 'Menue oeffnen'}
+              aria-label={mobileMenuOpen ? 'Menü schliessen' : 'Menü öffnen'}
             >
               {mobileMenuOpen ? <X className="h-7 w-7" /> : <Menu className="h-7 w-7" />}
             </button>
@@ -179,7 +179,7 @@ export default function PublicLanding() {
           <div className="mx-auto max-w-7xl text-center">
             <div className="landing-floating inline-block rounded-full border border-white/10 bg-white/5 px-4 py-1.5">
               <span className="text-[10px] font-bold uppercase tracking-widest text-[#ccff00] md:text-xs">
-                100% Kostenlos fuer Einsteiger
+                100% Kostenlos für Einsteiger
               </span>
             </div>
 
@@ -235,7 +235,7 @@ export default function PublicLanding() {
                   Dein Weg zum <span className="text-[#00d9ff]">Black Belt</span>
                 </h2>
                 <p className="mt-4 text-base text-slate-400 md:text-lg">
-                  Ein klares System fuer Stil, Fortschritt und Dominanz auf der Matte statt endloser Zufalls-Techniken.
+                  Ein klares System für Stil, Fortschritt und Dominanz auf der Matte statt endloser Zufalls-Techniken.
                 </p>
               </div>
               <div className="hidden select-none font-public-display text-6xl font-black uppercase text-white/5 md:block lg:text-8xl">
@@ -467,7 +467,7 @@ export default function PublicLanding() {
               <span className="font-public-display text-white">MAXXING</span>
             </Link>
             <p className="max-w-sm text-center font-medium text-slate-500 md:text-left">
-              Die Plattform fuer BJJ-Enthusiasten, die lieber ein System bauen als Reels sammeln.
+              Die Plattform für BJJ-Enthusiasten, die lieber ein System bauen als Reels sammeln.
             </p>
           </div>
 

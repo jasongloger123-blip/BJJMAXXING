@@ -66,8 +66,8 @@ export default function ArchetypeSelectPage() {
     <div className="min-h-screen bg-[#0d0b09] text-white">
       <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-10 md:px-8">
         <section className="w-full rounded-[2.8rem] border border-bjj-border bg-[#120f0d] px-6 py-8 shadow-card md:px-10 md:py-10">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Archetyp auswaehlen</p>
-          <h1 className="mt-4 text-4xl font-black tracking-[-0.04em] md:text-6xl">Waehle deinen finalen Archetyp</h1>
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-bjj-gold">Archetyp auswählen</p>
+          <h1 className="mt-4 text-4xl font-black tracking-[-0.04em] md:text-6xl">Wähle deinen finalen Archetyp</h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-white/64 md:text-base">
             Das geht nur jetzt im Onboarding. Danach bleibt dein Archetyp im Profil fest gesetzt.
           </p>
@@ -119,13 +119,13 @@ export default function ArchetypeSelectPage() {
               onClick={handleContinue}
               className="rounded-2xl bg-bjj-gold px-8 py-4 text-base font-black uppercase tracking-[0.12em] text-bjj-coal transition hover:bg-bjj-orange-light"
             >
-              Auswahl uebernehmen
+              Auswahl übernehmen
             </button>
             <button
               onClick={() => router.push('/archetype-result')}
               className="rounded-2xl border border-bjj-border bg-bjj-card px-8 py-4 text-base font-black uppercase tracking-[0.12em] text-white/82 transition hover:border-bjj-gold/25 hover:text-white"
             >
-              Zurueck zum Ergebnis
+              Zurück zum Ergebnis
             </button>
           </div>
         </section>

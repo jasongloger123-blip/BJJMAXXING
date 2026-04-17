@@ -225,8 +225,8 @@ export default function TechniqueLibraryPage() {
           description: locked
             ? `${planNode?.title ?? technique.title} bleibt noch gesperrt. Schalte erst deinen aktuellen Schritt im Gameplan frei, dann geht diese Technik auf.`
             : technique.prerequisites.length
-              ? `Arbeite von ${technique.prerequisites[0] ?? 'deinem letzten Knoten'} weiter in die naechste Verbindung.`
-              : 'Der Einstiegspunkt fuer dein System mit klarer Progression in die naechsten Videos.',
+              ? `Arbeite von ${technique.prerequisites[0] ?? 'deinem letzten Knoten'} weiter in die nächste Verbindung.`
+              : 'Der Einstiegspunkt für dein System mit klarer Progression in die nächsten Videos.',
           tag: STAGE_LABELS[stage],
           tagColor: STAGE_TAG_COLORS[stage],
           level: technique.level,

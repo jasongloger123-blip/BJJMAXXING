@@ -287,7 +287,7 @@ function SourceCard({
       }`}
     >
       <div className="flex items-start gap-3">
-        {/* Checkbox fuer Mehrfachauswahl */}
+        {/* Checkbox für Mehrfachauswahl */}
         {source.id && !isAssigned && (
           <div className="shrink-0 pt-0.5">
             <button
@@ -331,7 +331,7 @@ function SourceCard({
             )}
             {selected && !isAssigned && (
               <span className="shrink-0 rounded-full bg-bjj-gold/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bjj-gold">
-                Ausgewaehlt
+                Ausgewählt
               </span>
             )}
           </div>
@@ -797,8 +797,8 @@ export default function AdminOutlierDbPage() {
     setMapping(false)
     setSuccess(
       selectedClipIds.length > 1 || targetNodeIds.length > 1
-        ? `${selectedClipIds.length} Quellen mit ${targetNodeIds.length} Technik-Slot${targetNodeIds.length === 1 ? '' : 's'} verknuepft.`
-        : 'Quelle mit Technik-Slot verknuepft.'
+        ? `${selectedClipIds.length} Quellen mit ${targetNodeIds.length} Technik-Slot${targetNodeIds.length === 1 ? '' : 's'} verknüpft.`
+        : 'Quelle mit Technik-Slot verknüpft.'
     )
     await loadNodeClipGroups(selectedNodeId)
   }
@@ -812,7 +812,7 @@ export default function AdminOutlierDbPage() {
   async function handleSaveRecommendedArchetypes() {
     const customTechnique = customTechniques.find((entry) => entry.id === selectedNodeId)
     if (!customTechnique) {
-      setError('Archetypen-Empfehlungen koennen aktuell nur fuer Custom-Techniken direkt gespeichert werden.')
+      setError('Archetypen-Empfehlungen können aktuell nur für Custom-Techniken direkt gespeichert werden.')
       return
     }
 
@@ -1641,7 +1641,7 @@ export default function AdminOutlierDbPage() {
                               {role.clips.length === 0 ? (
                                 <p className="mt-3 text-sm text-bjj-muted">
                                   {role.id === 'related_reference'
-                                    ? 'Noch keine Follow-Up-Videos verknuepft.'
+                                    ? 'Noch keine Follow-Up-Videos verknüpft.'
                                     : 'Noch keine zugeordneten Videos in diesem Bereich.'}
                                 </p>
                               ) : (

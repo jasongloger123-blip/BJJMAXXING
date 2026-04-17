@@ -16,6 +16,7 @@ type YoutubeEmbedProps = {
   showHeader?: boolean
   hideChrome?: boolean
   playbackRate?: number
+  resetKey?: number // Used to trigger seekTo(0) without remounting
 }
 
 function buildYoutubeEmbedUrl(url: string, hideChrome = false) {
@@ -41,7 +42,7 @@ function buildYoutubeEmbedUrl(url: string, hideChrome = false) {
   return `https://www.youtube.com/embed/${id}?${params.toString()}`
 }
 
-export function YoutubeEmbed({ title, url, showHeader = true, hideChrome = false, playbackRate = 1 }: YoutubeEmbedProps) {
+export function YoutubeEmbed({ title, url, showHeader = true, hideChrome = false, playbackRate = 1, resetKey = 0 }: YoutubeEmbedProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
 
   const sendYoutubeCommand = useCallback((func: string, args: unknown[] = []) => {
@@ -61,6 +62,20 @@ export function YoutubeEmbed({ title, url, showHeader = true, hideChrome = false
     const timeout = window.setTimeout(() => sendYoutubeCommand('setPlaybackRate', [playbackRate]), 500)
     return () => window.clearTimeout(timeout)
   }, [playbackRate, sendYoutubeCommand])
+
+  // Reset video to start when resetKey changes (without remounting)
+  useEffect(() => {
+    if (resetKey > 0) {
+      // First pause, then seek to 0, then play
+      sendYoutubeCommand('pauseVideo')
+      sendYoutubeCommand('seekTo', [0, true])
+      // Small delay to ensure seek completes before playing
+      const playTimeout = window.setTimeout(() => {
+        sendYoutubeCommand('playVideo')
+      }, 100)
+      return () => window.clearTimeout(playTimeout)
+    }
+  }, [resetKey, sendYoutubeCommand])
 
   if (!url) {
     return (
@@ -88,7 +103,7 @@ export function YoutubeEmbed({ title, url, showHeader = true, hideChrome = false
         rel="noreferrer"
         className="block rounded-2xl border border-bjj-border bg-bjj-surface p-4 text-sm text-bjj-orange"
       >
-        Video oeffnen: {title}
+        Video öffnen: {title}
       </a>
     )
   }
